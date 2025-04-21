@@ -14,7 +14,8 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
-use crate::config::MAX_APP_NUM;
+use crate::config::{MAX_APP_NUM, SYSCALL_NUM};
+use crate::syscall::get_syscall_id_index;
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
 use lazy_static::*;
@@ -45,6 +46,8 @@ pub struct TaskManagerInner {
     tasks: [TaskControlBlock; MAX_APP_NUM],
     /// id of current `Running` task
     current_task: usize,
+    /// syscall id list, a auxiliary list to get the specific syscall id index out of syscall id
+    syscall_id_list:[[usize;SYSCALL_NUM];MAX_APP_NUM]
 }
 
 lazy_static! {
@@ -65,6 +68,7 @@ lazy_static! {
                 UPSafeCell::new(TaskManagerInner {
                     tasks,
                     current_task: 0,
+                    syscall_id_list:[[0;SYSCALL_NUM];MAX_APP_NUM]
                 })
             },
         }
@@ -135,11 +139,57 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+    //add a new method supporting get current task id
+    fn get_current_task_id(&self)->usize{
+        let inner=self.inner.exclusive_access();
+        let result=inner.current_task;
+//        drop(inner);
+        result
+    }
+
+    //get the specific syscall times of the current task
+    fn get_syscall_times(&self,syscall_id:usize)->Option<usize>{
+        if let Some(index)=get_syscall_id_index(syscall_id){
+            let inner=self.inner.exclusive_access();
+            let result=inner.syscall_id_list[inner.current_task][index];
+            Some(result)
+        }else{
+            None
+        }
+    }
+
+    //add the specific syscall times of the current task
+    fn add_syscall_times_once(&self,syscall_id:usize)->isize{
+        if let Some(index)=get_syscall_id_index(syscall_id){
+            let mut inner=self.inner.exclusive_access();
+            let current_task=inner.current_task;
+            inner.syscall_id_list[current_task][index]+=1;
+            0
+        }else{
+            panic!("Can't not find such syscall that id = {}",syscall_id);
+        }
+    }
+}
+
+///get the syscall times of the current task
+pub fn get_syscall_times(syscall_id:usize)->Option<usize>{
+    TASK_MANAGER.get_syscall_times(syscall_id)
+}
+
+///add one to the syscall times of the current task
+pub fn add_syscall_times_once(syscall_id:usize)->isize{
+    TASK_MANAGER.add_syscall_times_once(syscall_id)
 }
 
 /// Run the first task in task list.
 pub fn run_first_task() {
     TASK_MANAGER.run_first_task();
+}
+
+/// get the current task id
+pub fn get_current_task_id()->usize{
+    TASK_MANAGER.get_current_task_id()
 }
 
 /// Switch current `Running` task to the task we have found,
