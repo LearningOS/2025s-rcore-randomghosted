@@ -5,6 +5,7 @@ use crate::mm::{
     kernel_stack_position, MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE,
 };
 use crate::trap::{trap_handler, TrapContext};
+use crate::syscall::SYSCALL_ID_LIST;
 
 /// The task control block (TCB) of a task.
 pub struct TaskControlBlock {
@@ -28,6 +29,9 @@ pub struct TaskControlBlock {
 
     /// Program break
     pub program_brk: usize,
+
+    /// Count of each syscall times
+    syscall_count_list: Vec<usize>
 }
 
 impl TaskControlBlock {
@@ -63,6 +67,7 @@ impl TaskControlBlock {
             base_size: user_sp,
             heap_bottom: user_sp,
             program_brk: user_sp,
+            syscall_count_list: [0;SYSCALL_ID_LIST.len()]
         };
         // prepare TrapContext in user space
         let trap_cx = task_control_block.get_trap_cx();
@@ -75,6 +80,16 @@ impl TaskControlBlock {
         );
         task_control_block
     }
+    /// add one to the specific syscall times
+    /// return the current value of the specific syscall times if success, else -1
+    pub fn add_syscall_times_once(&mut self, syscall_index_in_syscall_id_list: usize)->isize{
+        if syscall_index_in_syscall_id_list< 0 || syscall_index_in_syscall_id_list >= self.syscall_count_list.len(){
+            return -1;
+        }
+        self.syscall_count_list[syscall_index_in_syscall_id_list]+=1;
+        return self.syscall_count_list[syscall_index_in_syscall_id_list];
+    }
+
     /// change the location of the program break. return None if failed.
     pub fn change_program_brk(&mut self, size: i32) -> Option<usize> {
         let old_break = self.program_brk;

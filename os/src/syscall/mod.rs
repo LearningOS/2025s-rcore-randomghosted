@@ -24,12 +24,15 @@ const SYSCALL_MUNMAP: usize = 215;
 const SYSCALL_MMAP: usize = 222;
 /// trace syscall
 const SYSCALL_TRACE: usize = 410;
+/// syscall id list
+const SYSCALL_ID_LIST: Vec<usize> = [64,93,124,169,214,215,222,410];
 
 mod fs;
 mod process;
 
 use fs::*;
 use process::*;
+use crate::task::*;
 
 /// handle syscall exception with `syscall_id` and other arguments
 pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
@@ -43,5 +46,26 @@ pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
         SYSCALL_MUNMAP => sys_munmap(args[0], args[1]),
         SYSCALL_SBRK => sys_sbrk(args[0] as i32),
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
+    }
+}
+
+fn get_syscall_index(syscall_id:usize)->Option<usize>{
+    let mut left=0; let mut right=SYSCALL_ID_LIST.len()-1;
+    while left<right{
+        let mid=(left+right)/2;
+        if SYSCALL_ID_LIST[mid]==syscall_id{
+            return Some(mid);
+        }else if SYSCALL_ID_LIST[mid]>syscall_id{
+            right=mid-1;
+        }else{
+            left=mid+1;
+        }
+    }
+    None
+}
+
+pub fn add_syscall_times_once(syscall_id:usize)->!{
+    if let Some(index)= get_syscall_index(syscall_id){
+        
     }
 }

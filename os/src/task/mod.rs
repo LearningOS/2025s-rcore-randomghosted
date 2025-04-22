@@ -153,6 +153,22 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+    /// get the id (index) of current task
+    fn get_current_task_id()->usize{
+        self.current_task
+    }
+}
+
+/// add one to the specific syscall times count of the current task
+pub fn add_once_syscall_times(syscall_id_index_in_syscall_id_list:usize)->isize{
+    let mut inner = self.inner.exclusive_access();
+    if syscall_id_index_in_syscall_id_list<0 ||
+        syscall_id_index_in_syscall_id_list>=inner.tasks[inner.current_task].syscall_times_list.len(){
+        return -1;
+    }
+
+    inner.tasks[inner.current_task].syscall_times_list[syscall_id_index_in_syscall_id_list]+=1;
+    return inner.tasks[inner.current_task].syscall_times_list[syscall_id_index_in_syscall_id_list] as isize;
 }
 
 /// Run the first task in task list.
