@@ -140,7 +140,7 @@ impl TaskManager {
         }
     }
 
-    //add a new method supporting get current task id
+    ///add a new method supporting get current task id
     fn get_current_task_id(&self)->usize{
         let inner=self.inner.exclusive_access();
         let result=inner.current_task;
@@ -148,7 +148,7 @@ impl TaskManager {
         result
     }
 
-    //get the specific syscall times of the current task
+    ///get the specific syscall times of the current task
     fn get_syscall_times(&self,syscall_id:usize)->Option<usize>{
         if let Some(index)=get_syscall_id_index(syscall_id){
             let inner=self.inner.exclusive_access();
@@ -159,7 +159,7 @@ impl TaskManager {
         }
     }
 
-    //add the specific syscall times of the current task
+    ///add the specific syscall times of the current task
     fn add_syscall_times_once(&self,syscall_id:usize)->isize{
         if let Some(index)=get_syscall_id_index(syscall_id){
             let mut inner=self.inner.exclusive_access();
@@ -168,6 +168,7 @@ impl TaskManager {
             0
         }else{
             panic!("Can't not find such syscall that id = {}",syscall_id);
+//            return -1;
         }
     }
 }
