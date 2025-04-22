@@ -1,5 +1,6 @@
 //! Process management syscalls
-use crate::task::{change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, current_task_token};
+use crate::task::{change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, current_task_token,
+        get_syscall_times};
 use crate::mm::{VirtAddr, PhysAddr,PageTable, PageTableEntry, translated_byte_buffer};
 
 #[repr(C)]
@@ -49,7 +50,6 @@ pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
                 //not found
                 return -1;
             }
-
         },
 
         //write the address _id of current task with _data as u8
@@ -68,7 +68,11 @@ pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
 
         //get the total times call of specific syscall, _id is syscallId
         2=>{
-            
+            if let Some(index)=get_syscall_index(_id){
+                return get_syscall_times(index);
+            }else{
+                return -1;
+            }
         }
 
         _=>{

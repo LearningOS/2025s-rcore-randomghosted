@@ -21,6 +21,7 @@ use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
+pub use syscall:check_syscall_id_index_validity;
 
 pub use context::TaskContext;
 
@@ -162,13 +163,21 @@ impl TaskManager {
 /// add one to the specific syscall times count of the current task
 pub fn add_once_syscall_times(syscall_id_index_in_syscall_id_list:usize)->isize{
     let mut inner = self.inner.exclusive_access();
-    if syscall_id_index_in_syscall_id_list<0 ||
-        syscall_id_index_in_syscall_id_list>=inner.tasks[inner.current_task].syscall_times_list.len(){
+    if !check_syscall_id_index_validity(){
         return -1;
     }
 
     inner.tasks[inner.current_task].syscall_times_list[syscall_id_index_in_syscall_id_list]+=1;
     return inner.tasks[inner.current_task].syscall_times_list[syscall_id_index_in_syscall_id_list] as isize;
+}
+
+/// get specific syscall times of the current task
+pub fn get_syscall_times(syscall_id_index: usize)->Option<usize>{
+    if !check_syscall_id_index_validity(){
+        return None;
+    }
+    let inner=self.inner.exclusive_access();
+    return Some(inner.tasks[inner.current_task].syscall_times_list[syscall_id_index_in_syscall_id_list]);
 }
 
 /// Run the first task in task list.

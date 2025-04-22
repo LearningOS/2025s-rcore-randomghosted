@@ -34,8 +34,18 @@ use fs::*;
 use process::*;
 use crate::task::*;
 
+/// help to decide whether the syscall id index is valid
+fn check_syscall_id_index_validity(syscall_id_index_in_syscall_id_list)->bool{
+    syscall_id_index_in_syscall_id_list>=0 && syscall_id_index_in_syscall_id_list < SYSCALL_ID_LIST.len()
+}
+
 /// handle syscall exception with `syscall_id` and other arguments
 pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
+    if let Some(index)=get_syscall_index(syscall_id){
+        let _ =add_once_syscall_times(index);
+    }else{
+        panic!("Unsupported syscall_id: {}", syscall_id);
+    }
     match syscall_id {
         SYSCALL_WRITE => sys_write(args[0], args[1] as *const u8, args[2]),
         SYSCALL_EXIT => sys_exit(args[0] as i32),
@@ -48,7 +58,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
     }
 }
-
+/// get syscall id index in the SYSCALL_ID_LIST using binary search
 fn get_syscall_index(syscall_id:usize)->Option<usize>{
     let mut left=0; let mut right=SYSCALL_ID_LIST.len()-1;
     while left<right{
@@ -62,10 +72,4 @@ fn get_syscall_index(syscall_id:usize)->Option<usize>{
         }
     }
     None
-}
-
-pub fn add_syscall_times_once(syscall_id:usize)->!{
-    if let Some(index)= get_syscall_index(syscall_id){
-        
-    }
 }
