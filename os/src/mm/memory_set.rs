@@ -262,6 +262,12 @@ impl MemorySet {
             false
         }
     }
+
+    /// empty one page_table_entry
+    #[allow(unused)]
+    pub fn empty_one_pte(&mut self, target: VirtAddr){
+       self.page_table.unmap(target);
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
@@ -294,9 +300,13 @@ impl MapArea {
                 ppn = PhysPageNum(vpn.0);
             }
             MapType::Framed => {
-                let frame = frame_alloc().unwrap();
-                ppn = frame.ppn;
-                self.data_frames.insert(vpn, frame);
+                let frame = frame_alloc();
+                if frame.is_none(){
+                    trace!("failed to alloc page!");
+                    return;
+                }
+                ppn = frame.unwrap().ppn;
+                self.data_frames.insert(vpn, frame.unwrap());
             }
         }
         let pte_flags = PTEFlags::from_bits(self.map_perm.bits).unwrap();
@@ -322,7 +332,6 @@ impl MapArea {
     }
     #[allow(unused)]
     pub fn shrink_to(&mut self, page_table: &mut PageTable, new_end: VirtPageNum) {
-        for vpn in VPNRange::new(new_end, self.vpn_range.get_end()) {
             self.unmap_one(page_table, vpn)
         }
         self.vpn_range = VPNRange::new(self.vpn_range.get_start(), new_end);
