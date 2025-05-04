@@ -156,6 +156,7 @@ impl MemorySet {
         assert_eq!(magic, [0x7f, 0x45, 0x4c, 0x46], "invalid elf!");
         let ph_count = elf_header.pt2.ph_count();
         let mut max_end_vpn = VirtPageNum(0);
+        //println!("ph_count={}",ph_count);
         for i in 0..ph_count {
             let ph = elf.program_header(i).unwrap();
             if ph.get_type().unwrap() == xmas_elf::program::Type::Load {
@@ -174,11 +175,14 @@ impl MemorySet {
                 }
                 let map_area = MapArea::new(start_va, end_va, MapType::Framed, map_perm);
                 max_end_vpn = map_area.vpn_range.get_end();
+                //println!("ph_add");
                 memory_set.push(
                     map_area,
                     Some(&elf.input[ph.offset() as usize..(ph.offset() + ph.file_size()) as usize]),
                 );
+                //println!("ph_add2");
             }
+            //println!("{}",i);
         }
         // map user stack with U flags
         let max_end_va: VirtAddr = max_end_vpn.into();
@@ -186,6 +190,7 @@ impl MemorySet {
         // guard page
         user_stack_bottom += PAGE_SIZE;
         let user_stack_top = user_stack_bottom + USER_STACK_SIZE;
+        //println!("here");
         memory_set.push(
             MapArea::new(
                 user_stack_bottom.into(),
@@ -236,6 +241,7 @@ impl MemorySet {
     /// shrink the area to new_end
     #[allow(unused)]
     pub fn shrink_to(&mut self, start: VirtAddr, new_end: VirtAddr) -> bool {
+        println!("shrink: {}-{}",start.0,new_end.0);
         if let Some(area) = self
             .areas
             .iter_mut()
@@ -266,7 +272,13 @@ impl MemorySet {
     /// empty one page_table_entry
     #[allow(unused)]
     pub fn empty_one_pte(&mut self, target: VirtAddr){
-       self.page_table.unmap(target);
+       self.page_table.unmap(target.into());
+    }
+
+    /// get mutable reference of the memory_set of the current task
+    #[allow(unused)]
+    pub fn get_mut<T>(&mut self)->&'static mut T{
+        unsafe{((self) as *mut MemorySet as *mut T).as_mut().unwrap()}
     }
 }
 /// map area structure, controls a contiguous piece of virtual memory
@@ -300,17 +312,14 @@ impl MapArea {
                 ppn = PhysPageNum(vpn.0);
             }
             MapType::Framed => {
-                let frame = frame_alloc();
-                if frame.is_none(){
-                    trace!("failed to alloc page!");
-                    return;
-                }
-                ppn = frame.unwrap().ppn;
-                self.data_frames.insert(vpn, frame.unwrap());
+                let frame = frame_alloc().unwrap();
+                ppn = frame.ppn;
+                self.data_frames.insert(vpn, frame);
             }
         }
         let pte_flags = PTEFlags::from_bits(self.map_perm.bits).unwrap();
         page_table.map(vpn, ppn, pte_flags);
+//        println!("map: {}->{}",vpn.0,ppn.0);
     }
     #[allow(unused)]
     pub fn unmap_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {
@@ -332,6 +341,9 @@ impl MapArea {
     }
     #[allow(unused)]
     pub fn shrink_to(&mut self, page_table: &mut PageTable, new_end: VirtPageNum) {
+        //if need to shrink vpn_range should begin from new_end and end with original end because
+        //latter is bigger
+        for vpn in VPNRange::new(new_end,self.vpn_range.get_end()){
             self.unmap_one(page_table, vpn)
         }
         self.vpn_range = VPNRange::new(self.vpn_range.get_start(), new_end);
@@ -350,20 +362,30 @@ impl MapArea {
         let mut start: usize = 0;
         let mut current_vpn = self.vpn_range.get_start();
         let len = data.len();
+        //println!("copy_data2");
+        //let mut count=0;
         loop {
+            //println!("current turn :{}",count);
+          //  count+=1;
             let src = &data[start..len.min(start + PAGE_SIZE)];
-            let dst = &mut page_table
+            //println!("ok {}",count);
+            let dst_ = &mut page_table
                 .translate(current_vpn)
-                .unwrap()
-                .ppn()
-                .get_bytes_array()[..src.len()];
+                .unwrap();
+            //println!("unwrap done");
+            let dst= &mut dst_.ppn().get_bytes_array()[..src.len()];
+            //println!("start: {}",start);
             dst.copy_from_slice(src);
             start += PAGE_SIZE;
             if start >= len {
                 break;
             }
+            //println!("copy_data");
+            //println!("actual map:{}->{}",current_vpn.0, &mut dst_.ppn().0);
             current_vpn.step();
         }
+
+        //println!("copy_data done");
     }
 }
 

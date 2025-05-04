@@ -1,8 +1,12 @@
 //! Process management syscalls
-use crate::task::{change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, current_task_token,
-        get_syscall_times, TASK_MANAGER};
-use crate::mm::{VirtAddr, PhysAddr,PageTable, PageTableEntry, translated_byte_buffer,MapPermission};
+use crate::task::{change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, current_user_token,
+        get_syscall_times, current_user_memory_set};
+use crate::mm::{VirtPageNum,VirtAddr,PageTable, translated_byte_buffer,MapPermission};
+use crate::mm::{VA_WIDTH_SV39};
 use crate::timer::*;
+use crate::config::PAGE_SIZE;
+use super::get_syscall_index;
+use core::mem::size_of;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -30,11 +34,21 @@ pub fn sys_yield() -> isize {
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
-    //first get the actual physical address
-    let address= translated_byte_buffer(current_task_token(),VirtAddr::from(_ts as usize),1) as *mut TimeVal;
+    let mut timeval_slice=translated_byte_buffer(current_user_token(),_ts as *mut u8, size_of::<TimeVal>());
     let time=get_time_us();
-    address.sec=time/1_000_000;
-    address.usec=time % 1_000_000;
+    let timeval=TimeVal{
+        sec:time/1_000_000, usec:time % 1_000_000
+    };
+    
+    let timeval_new_slice=unsafe{core::slice::from_raw_parts(&timeval as *const TimeVal as *const u8,size_of::<TimeVal>())};
+
+    let mut count=0;
+    for i in 0..timeval_slice.len(){
+        for j in 0..timeval_slice[i].len(){
+            timeval_slice[i][j]=timeval_new_slice[count];
+            count+=1;
+        }
+    }
     return 0;
 }
 
@@ -45,10 +59,13 @@ pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
     match _trace_request{
         //read the address of current task as u8, _id is the address
         0=>{
-            //find the pageTableEntry using _id (user_address)
-            if let Some(page_table_entry)= PageTable::from(current_task_token()).translate(VirtAddr::from(_id)){
-                if page_table_entry.is_readable(){
-                    return translated_byte_buffer(current_task_token(),VirtAddr::from(_id),1)[0][0] as isize;
+            if _id>(1<<VA_WIDTH_SV39){
+                    return -1;
+            }
+
+            if let Some(page_table_entry)=PageTable::from_token(current_user_token()).translate(VirtAddr::from(_id).into()){
+                if page_table_entry.readable(){
+                    return translated_byte_buffer(current_user_token(),_id as *const u8,1)[0][0] as isize;
                 }else{
                     return -1;
                 }
@@ -60,9 +77,13 @@ pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
 
         //write the address _id of current task with _data as u8
         1=>{
-            if let Some(page_table_entry)=PageTable::from(current_task_token()).translate(VirtAddr::from(_id)){
-                if page_table_entry.is_writable(){
-                    *(translated_byte_buffer(current_task_token(),VirtAddr::from(_id),1)[0][0])=(_data as usize);
+            if _id > (1<<VA_WIDTH_SV39){
+                return -1;
+            }
+
+            if let Some(page_table_entry)=PageTable::from_token(current_user_token()).translate(VirtAddr::from(_id).into()){
+                if page_table_entry.writable(){
+                    translated_byte_buffer(current_user_token(),_id as *const u8,1)[0][0]=_data as u8;
                     return 0;
                 }else{
                     return -1;
@@ -75,7 +96,11 @@ pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
         //get the total times call of specific syscall, _id is syscallId
         2=>{
             if let Some(index)=get_syscall_index(_id){
-                return get_syscall_times(index);
+                if let Some(result)= get_syscall_times(index){
+                    return result as isize;
+                }else{
+                    return -1;
+                }
             }else{
                 return -1;
             }
@@ -102,29 +127,23 @@ pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
         return -1;
     }
     
-    let inner= TASK_MANAGER.inner.exclusive_access();
-    let TCB= inner.tasks[inner.current_task];
-    let memory_set_cur=TCB.memory_set;
+    let page_table_cur=PageTable::from_token(current_user_token());
     // get the page table of current task to see if the page is alloced
     loop{
-        if let Some(target_pte)= page_table.translate(start_va){
+        if let Some(target_pte)= page_table_cur.translate(start_va.into()){
             if target_pte.is_valid(){
                 trace!("there is a page which has been alloced already.");
                 return -1;
             }
         }
-        start_va.step_one();
+        start_va=VirtAddr::from(start_va.0+PAGE_SIZE);
         if start_va > end_va{
             break;
         }
     }
-
-    // first get the memory set of current task
-    let TCB= inner.tasks[inner.current_task];
-    let mut memory_set_cur= TCB.memory_set;
     
     //construct the MapPermission 
-    let permission:u8 = 0;
+    let mut permission= MapPermission::U;
     if _port & 0x1 !=0{
         permission |= MapPermission::R;
     }
@@ -134,47 +153,43 @@ pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
     if _port & 0x4 !=0{
         permission |= MapPermission::X;
     }
-    _port |= MapPermission::U;
 
     // insert the frame into the memory set
-    memory_set_cur.insert_framed_area(VirtAddr::from(_start), VirtAddr::from(_start + _len), permission);
-    if let Some(target_area)=memory_set_cur.areas.iter_mut()
-        .find(|area| area.get_start_address()==VirtAddr::from(_start).floor()){
-        target_area.map();
-    }else{
-        trace!("insertion of framed area has failed!");
-        return -1;
-    }
-
+    current_user_memory_set().insert_framed_area(VirtAddr::from(_start), VirtAddr::from(_start + _len), permission);
     return 0;
 }
 
 // YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
     trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
-    // shrink the mapped area
-    let inner= TASK_MANAGER.inner.exclusive_access();
-    let mut memory_set_cur= inner.task[inner.current_task].memory_set;
     
+    if VirtAddr::from(_start).page_offset()!=0{
+        return -1;
+    }
+    
+    // shrink the mapped area
+    let mut page_table_cur=PageTable::from_token(current_user_token());
+
     let mut start_va=VirtAddr::from(_start).floor();
     let end_va=VirtAddr::from(_start+_len);
     loop{
-        if let Some(target_pte)=memory_set_cur.translate(start_va){
+        if let Some(target_pte)=page_table_cur.translate(start_va.into()){
             if !target_pte.is_valid(){
-                trace!("there is a page which has not been alloced!");
+                println!("{}",start_va.0);
+                println!("there is a page which has not been alloced!");
                 return -1;
             }
         }
-        start_va.step_one();
-        if start_va>end_va{
+        start_va=VirtPageNum::from(start_va.0+1);
+        if VirtAddr::from(start_va)>=end_va{
             break;
         }
     }
+    start_va=VirtAddr::from(_start).floor();
     loop{
-        start_va= VirtAddr::from(_start).floor();
-        memory_set_cur.empty_one_pte(start_va);
-        start_va.step_one();
-        if start_va>end_va{
+        page_table_cur.unmap(start_va);
+        start_va=VirtPageNum::from(start_va.0+1);
+        if VirtAddr::from(start_va)>=end_va{
             break;
         }
     }

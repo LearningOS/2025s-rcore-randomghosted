@@ -1,10 +1,12 @@
 //! Types related to task management
 use super::TaskContext;
-use crate::config::TRAP_CONTEXT_BASE;
+use crate::config::{TRAP_CONTEXT_BASE};
 use crate::mm::{
     kernel_stack_position, MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE,
 };
 use crate::trap::{trap_handler, TrapContext};
+use alloc::vec;
+use alloc::vec::Vec;
 use crate::syscall::SYSCALL_ID_LIST;
 
 /// The task control block (TCB) of a task.
@@ -31,7 +33,7 @@ pub struct TaskControlBlock {
     pub program_brk: usize,
 
     /// Count of each syscall times
-    syscall_count_list: Vec<usize>
+    pub syscall_count_list: Vec<usize>
 }
 
 impl TaskControlBlock {
@@ -43,6 +45,11 @@ impl TaskControlBlock {
     pub fn get_user_token(&self) -> usize {
         self.memory_set.token()
     }
+
+    /// get the user memory set
+    pub fn get_user_memory_set(& mut self)->&'static mut MemorySet{
+        self.memory_set.get_mut()
+    } 
     /// Based on the elf info in program, build the contents of task in a new address space
     pub fn new(elf_data: &[u8], app_id: usize) -> Self {
         // memory_set with elf program headers/trampoline/trap context/user stack
@@ -67,7 +74,7 @@ impl TaskControlBlock {
             base_size: user_sp,
             heap_bottom: user_sp,
             program_brk: user_sp,
-            syscall_count_list: [0;SYSCALL_ID_LIST.len()]
+            syscall_count_list: vec![0;SYSCALL_ID_LIST.len()]
         };
         // prepare TrapContext in user space
         let trap_cx = task_control_block.get_trap_cx();
@@ -83,11 +90,11 @@ impl TaskControlBlock {
     /// add one to the specific syscall times
     /// return the current value of the specific syscall times if success, else -1
     pub fn add_syscall_times_once(&mut self, syscall_index_in_syscall_id_list: usize)->isize{
-        if syscall_index_in_syscall_id_list< 0 || syscall_index_in_syscall_id_list >= self.syscall_count_list.len(){
+        if  syscall_index_in_syscall_id_list >= self.syscall_count_list.len(){
             return -1;
         }
         self.syscall_count_list[syscall_index_in_syscall_id_list]+=1;
-        return self.syscall_count_list[syscall_index_in_syscall_id_list];
+        return self.syscall_count_list[syscall_index_in_syscall_id_list] as isize;
     }
 
     /// change the location of the program break. return None if failed.
@@ -98,6 +105,7 @@ impl TaskControlBlock {
             return None;
         }
         let result = if size < 0 {
+            println!("{}-{}",self.heap_bottom, new_brk as usize);
             self.memory_set
                 .shrink_to(VirtAddr(self.heap_bottom), VirtAddr(new_brk as usize))
         } else {

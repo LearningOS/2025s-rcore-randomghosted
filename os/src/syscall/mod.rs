@@ -25,7 +25,7 @@ const SYSCALL_MMAP: usize = 222;
 /// trace syscall
 const SYSCALL_TRACE: usize = 410;
 /// syscall id list
-const SYSCALL_ID_LIST: Vec<usize> = [64,93,124,169,214,215,222,410];
+pub const SYSCALL_ID_LIST: [usize;8] = [64,93,124,169,214,215,222,410];
 
 mod fs;
 mod process;
@@ -35,8 +35,8 @@ use process::*;
 use crate::task::*;
 
 /// help to decide whether the syscall id index is valid
-fn check_syscall_id_index_validity(syscall_id_index_in_syscall_id_list)->bool{
-    syscall_id_index_in_syscall_id_list>=0 && syscall_id_index_in_syscall_id_list < SYSCALL_ID_LIST.len()
+pub fn check_syscall_id_index_validity(syscall_id_index_in_syscall_id_list:usize)->bool{
+    syscall_id_index_in_syscall_id_list < SYSCALL_ID_LIST.len()
 }
 
 /// handle syscall exception with `syscall_id` and other arguments
@@ -59,9 +59,9 @@ pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
     }
 }
 /// get syscall id index in the SYSCALL_ID_LIST using binary search
-fn get_syscall_index(syscall_id:usize)->Option<usize>{
+pub fn get_syscall_index(syscall_id:usize)->Option<usize>{
     let mut left=0; let mut right=SYSCALL_ID_LIST.len()-1;
-    while left<right{
+    while left<=right{
         let mid=(left+right)/2;
         if SYSCALL_ID_LIST[mid]==syscall_id{
             return Some(mid);

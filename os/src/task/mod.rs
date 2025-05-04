@@ -21,7 +21,8 @@ use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
-pub use syscall:check_syscall_id_index_validity;
+use crate::syscall::{check_syscall_id_index_validity};
+use crate::mm::MemorySet;
 
 pub use context::TaskContext;
 
@@ -57,7 +58,9 @@ lazy_static! {
         println!("num_app = {}", num_app);
         let mut tasks: Vec<TaskControlBlock> = Vec::new();
         for i in 0..num_app {
-            tasks.push(TaskControlBlock::new(get_app_data(i), i));
+            let re=get_app_data(i);
+            let task_=TaskControlBlock::new(re,i);
+            tasks.push(task_);
         }
         TaskManager {
             num_app,
@@ -118,7 +121,15 @@ impl TaskManager {
     /// Get the current 'Running' task's token.
     fn get_current_token(&self) -> usize {
         let inner = self.inner.exclusive_access();
-        inner.tasks[inner.current_task].get_user_token()
+        let current_task=inner.current_task;
+        inner.tasks[current_task].get_user_token()
+    }
+
+    fn get_current_memory_set(&self)->&'static mut MemorySet{
+        let mut inner= self.inner.exclusive_access();
+        let current_task=inner.current_task;
+        let result=inner.tasks[current_task].get_user_memory_set();
+        result
     }
 
     /// Get the current 'Running' task's trap contexts.
@@ -155,29 +166,34 @@ impl TaskManager {
         }
     }
     /// get the id (index) of current task
-    fn get_current_task_id()->usize{
-        self.current_task
+    #[allow(unused)]
+    fn get_current_task_id(&self)->usize{
+        let inner = self.inner.exclusive_access();
+        inner.current_task
     }
+
+
 }
 
 /// add one to the specific syscall times count of the current task
 pub fn add_once_syscall_times(syscall_id_index_in_syscall_id_list:usize)->isize{
-    let mut inner = self.inner.exclusive_access();
-    if !check_syscall_id_index_validity(){
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    if !check_syscall_id_index_validity(syscall_id_index_in_syscall_id_list){
         return -1;
     }
 
-    inner.tasks[inner.current_task].syscall_times_list[syscall_id_index_in_syscall_id_list]+=1;
-    return inner.tasks[inner.current_task].syscall_times_list[syscall_id_index_in_syscall_id_list] as isize;
+    let current_task=inner.current_task;
+    inner.tasks[current_task].syscall_count_list[syscall_id_index_in_syscall_id_list]+=1;
+    return inner.tasks[current_task].syscall_count_list[syscall_id_index_in_syscall_id_list] as isize;
 }
 
 /// get specific syscall times of the current task
-pub fn get_syscall_times(syscall_id_index: usize)->Option<usize>{
-    if !check_syscall_id_index_validity(){
+pub fn get_syscall_times(syscall_id_index_in_syscall_id_list: usize)->Option<usize>{
+    if !check_syscall_id_index_validity(syscall_id_index_in_syscall_id_list){
         return None;
     }
-    let inner=self.inner.exclusive_access();
-    return Some(inner.tasks[inner.current_task].syscall_times_list[syscall_id_index_in_syscall_id_list]);
+    let inner=TASK_MANAGER.inner.exclusive_access();
+    return Some(inner.tasks[inner.current_task].syscall_count_list[syscall_id_index_in_syscall_id_list]);
 }
 
 /// Run the first task in task list.
@@ -216,6 +232,11 @@ pub fn exit_current_and_run_next() {
 /// Get the current 'Running' task's token.
 pub fn current_user_token() -> usize {
     TASK_MANAGER.get_current_token()
+}
+
+/// Get the current 'Running' task's memory set
+pub fn current_user_memory_set()->&'static mut MemorySet{
+    TASK_MANAGER.get_current_memory_set()    
 }
 
 /// Get the current 'Running' task's trap contexts.
