@@ -135,7 +135,7 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 /// YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
     // check input validation
-    if VirtAddr::from(_start).page_offset()!=0 || _port==0 || _port & !0x7 !=0 {
+    if VirtAddr::from(_start).page_offset()!=0 || _port & 0x7 == 0 || _port & !0x7 !=0 {
         return -1;
     }
     if _len==0{
