@@ -147,26 +147,30 @@ pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
     let current_task_memory_set=target_task.get_memory_set();
 
     let check_point_in_range=|left_bound:usize, right_bound:usize, target:usize|->bool{
+        println!("{}-{}, {}",left_bound,right_bound,target);
         return target>=left_bound && target<right_bound;
     };
 
-    let _end=VirtAddr::from(_start+_len).ceil().0;
-    let _start=VirtAddr::from(_start).floor().0;
-    
+    let end=VirtAddr::from(_start+_len).ceil().0;
+    let start=VirtAddr::from(_start).floor().0;
+
     if current_task_memory_set.areas.iter().any(|area| 
-        check_point_in_range(_start,_end,area.vpn_range.get_start().0) 
-        || check_point_in_range(_start,_end,area.vpn_range.get_end().0) 
-        || check_point_in_range(area.vpn_range.get_start().0, area.vpn_range.get_end().0, _start) 
-        || check_point_in_range(area.vpn_range.get_start().0,area.vpn_range.get_end().0,_end)){
+        check_point_in_range(start,end,area.vpn_range.get_start().0) 
+        || check_point_in_range(start+1,end+1,area.vpn_range.get_end().0) 
+        || check_point_in_range(area.vpn_range.get_start().0, area.vpn_range.get_end().0, start) 
+        || check_point_in_range(area.vpn_range.get_start().0+1,area.vpn_range.get_end().0+1,end)){
+    println!("overlap");
         return -1;
     }
+    println!("done");
    
     let mut permission= MapPermission::U;
     if _port & 0x1 !=0{ permission |= MapPermission::R; }
     if _port & 0x2 !=0{ permission |= MapPermission::W; }
     if _port & 0x4 !=0{ permission |= MapPermission::X; }
 
-    current_task_memory_set.insert_framed_area(VirtAddr::from(_start),VirtAddr::from(_end), permission);
+    println!("_start: {}, _len:{}",_start,_len);
+    current_task_memory_set.insert_framed_area(VirtAddr::from(_start),VirtAddr::from(_start+_len), permission);
     0
 }
 
@@ -180,10 +184,33 @@ pub fn sys_munmap(_start: usize, _len: usize) -> isize {
     }
     let mut page_table=PageTable::from_token(current_user_token());
     let unmap_vpn_range=VPNRange::new(VirtAddr::from(_start).floor(),VirtAddr::from(_start+_len).ceil());
-    if unmap_vpn_range.into_iter().enumerate().any(|(_,vpn)| page_table.translate(vpn).is_none()){
+       
+    if let Some(_) =unmap_vpn_range.into_iter().enumerate()
+        .find(|(_,vpn)| {
+            let pte=page_table.translate(*vpn);
+            return pte.is_none() || !pte.unwrap().is_valid();
+        })  
+    {
         return -1;
     }
-    let _= unmap_vpn_range.into_iter().enumerate().map(|(_,vpn)| page_table.unmap(vpn));
+ 
+    let memory_set=current_task().unwrap().get_memory_set(); 
+    if let Some((idx,_))=memory_set.areas.iter().enumerate().find(|(_idx,&ref area)|{
+        area.vpn_range.get_start()==unmap_vpn_range.get_start()
+        && area.vpn_range.get_end()==unmap_vpn_range.get_end()
+    })
+    {
+        println!("the line: {}, {}", memory_set.areas.get(idx).unwrap().vpn_range.get_start().0,
+        memory_set.areas.get(idx).unwrap().vpn_range.get_end().0);
+        memory_set.areas.remove(idx);
+    }
+
+    let _= unmap_vpn_range.into_iter().enumerate().for_each(|(_,vpn)| 
+        {
+            page_table.unmap(vpn);
+            println!("unmap vpn:{}",vpn.0);
+    });
+    println!("unmap done");
     0
 }
 
