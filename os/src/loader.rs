@@ -52,6 +52,22 @@ lazy_static! {
     };
 }
 
+/// get string by ptr
+#[allow(unused)]
+pub fn get_app_name_by_ptr(ptr: *const u8)->&'static str{
+    let mut end=ptr;
+    let start=ptr;
+    unsafe{
+        while end.read_volatile() != b'\0'{
+            end = end.add(1);
+        }
+    
+        let slice=core::slice::from_raw_parts(start,end as usize - start as usize);
+        let str_=core::str::from_utf8(slice).unwrap();
+        return str_
+    }
+}
+
 #[allow(unused)]
 ///get app data from name
 pub fn get_app_data_by_name(name: &str) -> Option<&'static [u8]> {
