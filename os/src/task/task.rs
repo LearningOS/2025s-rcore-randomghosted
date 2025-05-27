@@ -1,6 +1,6 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
-use super::{get_app_data_by_name,current_user_token};
+use super::{current_user_token};
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 use crate::config::TRAP_CONTEXT_BASE;
 use crate::fs::{File, Stdin, Stdout};
@@ -11,6 +11,7 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
+use crate::loader::get_app_data_by_name;
 /// Task control block structure
 ///
 /// Directly save the contents that will not change during running
@@ -251,7 +252,7 @@ impl TaskControlBlock {
             return None;
         }
         let app_data=app_data.unwrap();
-        let app_control_block=TaskControlBlock::new(app_data);
+        let app_control_block=TaskControlBlock::new(&app_data);
         
         // maintain the relationship between parent and child process
         let mut inner=app_control_block.inner_exclusive_access();

@@ -6,8 +6,7 @@ use core::mem::size_of;
 use crate::{
     fs::{open_file, OpenFlags},
     mm::{translated_refmut, translated_str},
-    loader::get_app_data_by_name,
-    mm::{translated_refmut, translated_str, translated_byte_buffer, VirtAddr, MapPermission, PageTable, VPNRange},
+    mm::{translated_byte_buffer, VirtAddr, MapPermission, PageTable, VPNRange},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
         suspend_current_and_run_next
@@ -137,7 +136,7 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 /// YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
     // check input validation
-    if VirtAddr::from(_start).page_offset()!=0 || _port==0 || _port & !0x7 !=0 {
+    if VirtAddr::from(_start).page_offset()!=0 || _port & 0x7 == 0 || _port & !0x7 !=0 {
         return -1;
     }
     if _len==0{
@@ -152,14 +151,14 @@ pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
         return target>=left_bound && target<right_bound;
     };
 
-    let _end=VirtAddr::from(_start+_len).ceil().0;
-    let _start=VirtAddr::from(_start).floor().0;
-    
+    let end=VirtAddr::from(_start+_len).ceil().0;
+    let start=VirtAddr::from(_start).floor().0;
+
     if current_task_memory_set.areas.iter().any(|area| 
-        check_point_in_range(_start,_end,area.vpn_range.get_start().0) 
-        || check_point_in_range(_start,_end,area.vpn_range.get_end().0) 
-        || check_point_in_range(area.vpn_range.get_start().0, area.vpn_range.get_end().0, _start) 
-        || check_point_in_range(area.vpn_range.get_start().0,area.vpn_range.get_end().0,_end)){
+        check_point_in_range(start,end,area.vpn_range.get_start().0) 
+        || check_point_in_range(start+1,end+1,area.vpn_range.get_end().0) 
+        || check_point_in_range(area.vpn_range.get_start().0, area.vpn_range.get_end().0, start) 
+        || check_point_in_range(area.vpn_range.get_start().0+1,area.vpn_range.get_end().0+1,end)){
         return -1;
     }
    
@@ -168,7 +167,7 @@ pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
     if _port & 0x2 !=0{ permission |= MapPermission::W; }
     if _port & 0x4 !=0{ permission |= MapPermission::X; }
 
-    current_task_memory_set.insert_framed_area(VirtAddr::from(_start),VirtAddr::from(_end), permission);
+    current_task_memory_set.insert_framed_area(VirtAddr::from(_start),VirtAddr::from(_start+_len), permission);
     0
 }
 
@@ -182,10 +181,29 @@ pub fn sys_munmap(_start: usize, _len: usize) -> isize {
     }
     let mut page_table=PageTable::from_token(current_user_token());
     let unmap_vpn_range=VPNRange::new(VirtAddr::from(_start).floor(),VirtAddr::from(_start+_len).ceil());
-    if unmap_vpn_range.into_iter().enumerate().any(|(_,vpn)| page_table.translate(vpn).is_none()){
+       
+    if let Some(_) =unmap_vpn_range.into_iter().enumerate()
+        .find(|(_,vpn)| {
+            let pte=page_table.translate(*vpn);
+            return pte.is_none() || !pte.unwrap().is_valid();
+        })  
+    {
         return -1;
     }
-    let _= unmap_vpn_range.into_iter().enumerate().map(|(_,vpn)| page_table.unmap(vpn));
+ 
+    let memory_set=current_task().unwrap().get_memory_set(); 
+    if let Some((idx,_))=memory_set.areas.iter().enumerate().find(|(_idx,&ref area)|{
+        area.vpn_range.get_start()==unmap_vpn_range.get_start()
+        && area.vpn_range.get_end()==unmap_vpn_range.get_end()
+    })
+    {
+        memory_set.areas.remove(idx);
+    }
+
+    let _= unmap_vpn_range.into_iter().enumerate().for_each(|(_,vpn)| 
+        {
+            page_table.unmap(vpn);
+    });
     0
 }
 
