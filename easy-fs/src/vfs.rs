@@ -117,7 +117,7 @@ impl Inode {
         });
         let new_size=new_size as usize;
         if new_size>=current_size{return;}
-        
+        assert!(false);
         let dealloc_data_block_id=disk_inode.decrease_size(new_size,&self.block_device);
         dealloc_data_block_id.iter().enumerate().for_each(|(_,block_id)|{
             fs.dealloc_data(*block_id as u32);
@@ -335,11 +335,11 @@ pub fn unlinkat(path:&str,where_to_unlink:&Arc<Inode>)->isize{
 
     let current_link=file_inode.get_num_of_links();
     assert!(current_link>0);
-    if current_link>1{
-        file_inode.modify_disk_inode(|disk_inode:&mut DiskInode|{
-            disk_inode.subtract_link();
-        })
-    }else{
+    
+     file_inode.modify_disk_inode(|disk_inode:&mut DiskInode|{
+         disk_inode.subtract_link();
+     })
+    if current_link==0{
         return where_to_unlink.clone().delete_file(path);
     }
     0
