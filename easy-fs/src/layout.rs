@@ -241,8 +241,80 @@ impl DiskInode {
     }
 
     /// decrease the file size
-    pub fn decrease_size(&mut self, new_size:usize, block_device:&Arc<dyn BlockDevice>){
+    pub fn decrease_size(&mut self, new_size:usize, block_device:&Arc<dyn BlockDevice>)->Vec<u32>{
+        let mut origin_blocks=self.data_blocks();
+        self.size=new_size;
+        let current_blocks=self.data_blocks();
         
+        if current_blocks>=origin_blocks{
+            return Vec::new();
+        }
+
+        let dealloc_data_block_vec=Vec::new();
+
+        if origin_blocks>INDIRECT2_BOUND{
+            let inter1=origin_blocks-INDIRECT2_BOUND;
+            let mut a1=inter1/INODE_INDIRECT1_COUNT;
+            let mut b1=inter1%INODE_INDIRECT1_COUNT;
+            let inter0=current_blocks.max(INDIRECT2_BOUND);
+            let a0=inter0/INODE_INDIRECT1_COUNT;
+            let b0=inter0%INODE_INDIRECT1_COUNT;
+            
+            if b1==0{
+                b1=INODE_INDIRECT1_COUNT-1;
+                a1-=1;
+            }else{
+                b1-=1;
+            }
+
+            get_block_cache(self.indirect2,Arc::clone(block_device))
+                .lock()
+                .modify(0,|indirect_block:&mut IndirectBlock|{
+                    while a1>a0 || (a1==a0 && b1>b0){
+                        get_block_cache(indirect_block[a1],Arc::clone(block_device))
+                            .lock()
+                            .modify(0,|inner_indirect_block:&mut IndirectBlock|{
+                                dealloc_data_block_vec.push(inner_indirect_block[b1]);  
+                                inner_indirect_block[b1]=0;
+                            })
+                        if b1==0{b1=INODE_INDIRECT1_COUNT;a1-=1;}
+                        else{b1-=1;}
+                    }
+                })
+
+            origin_blocks=current_blocks.max(INDIRECT1_BOUND);
+        }
+
+        if current_blocks<INDIRECT1_BOUND && origin_blocks>=DIRECT_BOUND{
+            let mut inter1=origin_blocks-DIRECT_BOUND;
+            let inter0=current_blocks.max(DIRECT_BOUND);
+            
+            inter1-=1;
+
+            get_block_cache(self.indirect1, Arc::clone(&block_device))
+                .lock()
+                .modify(0,|indirect_block:&mut IndirectBlock|{
+                    while inter1>inter0{
+                        dealloc_data_block_vec.push(indirect_block[inter1]);
+                        indirect_block[inter1]=0;
+                        inter1-=1;
+                    }
+                })
+
+            origin_blocks=inter0;
+        }
+
+        if current_blocks<DIRECT_BOUND{
+            origin_blocks-=1;
+            while origin_blocks>current_blocks{
+                dealloc_data_block_vec.push(self.direct[origin_blocks]);
+                self.direct[origin_blocks]=0;
+                origin_blocks-=1;
+            }
+        }
+        block_cache_sync_all();
+
+        dealloc_data_block_vec
     }
 
     /// add the link by 1

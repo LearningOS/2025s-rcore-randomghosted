@@ -107,6 +107,18 @@ impl Inode {
         }
         disk_inode.increase_size(new_size, v, &self.block_device);
     }
+
+    /// Decrease the size of a disk Inode
+    /// before decreasing the size, work must be done to make sure that the shrinked space is
+    /// translate
+    fn decrease_size(&self, new_size:u32, disk_inode:&mut DiskInode, fs:&mut MutexGuard<EasyFileSystem>){
+        if new_size>=self.size{return;}
+        let dealloc_data_block_id=disk_inode.decrease_size(new_size,&self.block_device);
+        dealloc_data_block_id.iter().enumerate().for_each(|(_,block_id)|{
+            fs.dealloc_data(*block_id as u32);
+        })
+    }
+
     /// Create inode under current inode by name
     pub fn create(&self, name: &str) -> Option<Arc<Inode>> {
         let mut fs = self.fs.lock();
@@ -275,7 +287,10 @@ impl Inode{
             inode.write_at(idx*DIRENT_SZ,&buf);
         });
 
-        inode.decrease_size(after_size,&self.block_device);
+        let fs=inode.fs.lock();
+        inode.modify_disk_inode(|disk_inode:&mut DiskInode|{
+            inode.decrease_size(after_size,disk_inode,fs);
+        })
         0
     }
 }
@@ -318,6 +333,8 @@ pub fn unlinkat(path:&str,where_to_unlink:&Arc<Inode>)->isize{
         file_inode.modify_disk_inode(|disk_inode:&mut DiskInode|{
             disk_inode.subtract_link();
         })
+    }else{
+        return where_to_unlink.delete_file(path);
     }
-    -1
+    0
 }

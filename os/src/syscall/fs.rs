@@ -131,9 +131,8 @@ pub fn sys_linkat(_old_name: *const u8, _new_name: *const u8) -> isize {
 
 /// YOUR JOB: Implement unlinkat.
 pub fn sys_unlinkat(_name: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_unlinkat NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    let file_name=translated_str(current_user_token(),_name);
+    let result=unlinkat(&file_name,&ROOT_INODE);
+
+    result as isize
 }
