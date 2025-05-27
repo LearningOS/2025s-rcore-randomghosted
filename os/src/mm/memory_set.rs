@@ -38,8 +38,10 @@ pub fn kernel_token() -> usize {
 
 /// address space
 pub struct MemorySet {
-    page_table: PageTable,
-    areas: Vec<MapArea>,
+    /// Page table of the memory set
+    pub page_table: PageTable,
+    /// Set of MapArea
+    pub areas: Vec<MapArea>,
 }
 
 impl MemorySet {
@@ -318,10 +320,15 @@ impl MemorySet {
             false
         }
     }
+
+    /// get mutable reference of memory set
+    pub fn get_mut(&mut self)->&'static mut Self{
+        unsafe{ (self as *mut MemorySet).as_mut().unwrap() }
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
-    vpn_range: VPNRange,
+    pub vpn_range: VPNRange,
     data_frames: BTreeMap<VirtPageNum, FrameTracker>,
     map_type: MapType,
     map_perm: MapPermission,

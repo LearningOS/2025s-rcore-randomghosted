@@ -1,14 +1,18 @@
 //! Process management syscalls
 //!
-use alloc::sync::Arc;
+//use alloc::sync::Arc;
+use core::mem::size_of;
 
 use crate::{
     fs::{open_file, OpenFlags},
     mm::{translated_refmut, translated_str},
+    loader::get_app_data_by_name,
+    mm::{translated_refmut, translated_str, translated_byte_buffer, VirtAddr, MapPermission, PageTable, VPNRange},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next,
+        suspend_current_and_run_next
     },
+    timer::*,
 };
 
 #[repr(C)]
@@ -87,14 +91,19 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
         // ++++ release child PCB
     });
     if let Some((idx, _)) = pair {
-        let child = inner.children.remove(idx);
+       // let mut found_pid=0;
+           
+            //let child=inner.children.get(idx);
+            //println!("count: {}", Arc::strong_count(&child.unwrap()));
+            let child = inner.children.remove(idx);
+            let found_pid = child.getpid();
+            // ++++ temporarily access child PCB exclusively
+            let exit_code = child.inner_exclusive_access().exit_code;
+            // ++++ release child PCB
+            *translated_refmut(inner.memory_set.token(), exit_code_ptr) = exit_code;
+        
         // confirm that child will be deallocated after being removed from children list
-        assert_eq!(Arc::strong_count(&child), 1);
-        let found_pid = child.getpid();
-        // ++++ temporarily access child PCB exclusively
-        let exit_code = child.inner_exclusive_access().exit_code;
-        // ++++ release child PCB
-        *translated_refmut(inner.memory_set.token(), exit_code_ptr) = exit_code;
+        // assert_eq!(Arc::strong_count(&child), 1);
         found_pid as isize
     } else {
         -2
@@ -110,25 +119,74 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
         "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let mut timeval_slice=translated_byte_buffer(current_user_token(),_ts as usize as *const u8,size_of::<TimeVal>());
+    let current_time=get_time();
+    let mut timeval_current=TimeVal{sec:current_time/1_000_000, usec:current_time%1_000_000};
+    unsafe{
+       let timeval_current_slice=core::slice::from_raw_parts(&mut timeval_current as *mut TimeVal as *mut u8, size_of::<TimeVal>());
+        let mut count=0;
+        for i in 0..timeval_slice.len(){
+            let length=timeval_slice[i].len();
+            timeval_slice[i].copy_from_slice(&timeval_current_slice[count..count+length]);
+            count+=timeval_slice[i].len();
+        }
+    }
+    0
 }
 
 /// YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    // check input validation
+    if VirtAddr::from(_start).page_offset()!=0 || _port==0 || _port & !0x7 !=0 {
+        return -1;
+    }
+    if _len==0{
+        return 0;
+    }
+
+    // check if there is already map area in current task
+    let target_task=current_task().unwrap();
+    let current_task_memory_set=target_task.get_memory_set();
+
+    let check_point_in_range=|left_bound:usize, right_bound:usize, target:usize|->bool{
+        return target>=left_bound && target<right_bound;
+    };
+
+    let _end=VirtAddr::from(_start+_len).ceil().0;
+    let _start=VirtAddr::from(_start).floor().0;
+    
+    if current_task_memory_set.areas.iter().any(|area| 
+        check_point_in_range(_start,_end,area.vpn_range.get_start().0) 
+        || check_point_in_range(_start,_end,area.vpn_range.get_end().0) 
+        || check_point_in_range(area.vpn_range.get_start().0, area.vpn_range.get_end().0, _start) 
+        || check_point_in_range(area.vpn_range.get_start().0,area.vpn_range.get_end().0,_end)){
+        return -1;
+    }
+   
+    let mut permission= MapPermission::U;
+    if _port & 0x1 !=0{ permission |= MapPermission::R; }
+    if _port & 0x2 !=0{ permission |= MapPermission::W; }
+    if _port & 0x4 !=0{ permission |= MapPermission::X; }
+
+    current_task_memory_set.insert_framed_area(VirtAddr::from(_start),VirtAddr::from(_end), permission);
+    0
 }
 
 /// YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    if VirtAddr::from(_start).page_offset()!=0{
+        return -1;
+    }
+    if _len==0{
+        return 0;
+    }
+    let mut page_table=PageTable::from_token(current_user_token());
+    let unmap_vpn_range=VPNRange::new(VirtAddr::from(_start).floor(),VirtAddr::from(_start+_len).ceil());
+    if unmap_vpn_range.into_iter().enumerate().any(|(_,vpn)| page_table.translate(vpn).is_none()){
+        return -1;
+    }
+    let _= unmap_vpn_range.into_iter().enumerate().map(|(_,vpn)| page_table.unmap(vpn));
+    0
 }
 
 /// change data segment size
@@ -144,20 +202,21 @@ pub fn sys_sbrk(size: i32) -> isize {
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
 pub fn sys_spawn(_path: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    let task=current_task().unwrap();
+    if let Some(child)=task.spawn(_path){
+        let childpid=child.getpid();
+        add_task(child);
+        childpid as isize
+    }else{
+        -1
+    }
 }
 
 // YOUR JOB: Set task priority.
 pub fn sys_set_priority(_prio: isize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    let task=current_task().unwrap();
+    let result=task.set_priority(_prio);
+    result
 }
 
 

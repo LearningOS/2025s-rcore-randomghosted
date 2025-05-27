@@ -1,16 +1,16 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
+use super::{get_app_data_by_name,current_user_token};
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 use crate::config::TRAP_CONTEXT_BASE;
 use crate::fs::{File, Stdin, Stdout};
-use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE, translated_str};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
-
 /// Task control block structure
 ///
 /// Directly save the contents that will not change during running
@@ -71,6 +71,12 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// Priority of scheduling, must >=2, default 16
+    pub priority: usize,
+
+    /// current stride, default 0
+    pub stride: usize,
 }
 
 impl TaskControlBlockInner {
@@ -135,6 +141,8 @@ impl TaskControlBlock {
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    priority: 16,
+                    stride:0
                 })
             },
         };
@@ -216,6 +224,8 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    priority:16,
+                    stride:0
                 })
             },
         });
@@ -231,9 +241,59 @@ impl TaskControlBlock {
         // ---- release parent PCB
     }
 
+    /// spawn a child process with executable file specificed by _path
+    pub fn spawn(self: Arc<TaskControlBlock>,_path: *const u8)->Option<Arc<Self>>{
+       // let app_name=get_app_name_by_ptr(_path);
+        let token=current_user_token();
+        let app_name=translated_str(token,_path);
+        let app_data=get_app_data_by_name(&app_name);
+        if app_data.is_none(){
+            return None;
+        }
+        let app_data=app_data.unwrap();
+        let app_control_block=TaskControlBlock::new(app_data);
+        
+        // maintain the relationship between parent and child process
+        let mut inner=app_control_block.inner_exclusive_access();
+        inner.parent=Some(Arc::downgrade(&self));
+        drop(inner);
+
+        let mut parent_inner=self.inner_exclusive_access();
+        let app_control_block_ptr=Arc::new(app_control_block);
+        parent_inner.children.push(app_control_block_ptr.clone());
+        drop(parent_inner);
+       
+        Some(app_control_block_ptr)
+    }
+
+    /// set priority
+    pub fn set_priority(&self,prio: isize)->isize{
+        if prio<=1{
+            return -1;
+        }
+
+        let mut inner=self.inner_exclusive_access();
+        inner.priority=prio as usize;
+
+        prio
+    }
+
+    /// use stride increment to change stride
+    pub fn set_stride_increment(&self, increment: usize)->usize{
+        let mut inner=self.inner_exclusive_access();
+        inner.stride += increment;
+        inner.stride
+    }
+
     /// get pid of process
     pub fn getpid(&self) -> usize {
         self.pid.0
+    }
+
+    /// get reference of current memory set
+    pub fn get_memory_set(&self)->&'static mut MemorySet{
+        let mut inner=self.inner_exclusive_access();
+        inner.memory_set.get_mut()
     }
 
     /// change the location of the program break. return None if failed.

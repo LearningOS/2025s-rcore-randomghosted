@@ -1,6 +1,7 @@
 //!Implementation of [`TaskManager`]
 use super::TaskControlBlock;
 use crate::sync::UPSafeCell;
+use crate::task::TaskStatus;
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use lazy_static::*;
@@ -23,7 +24,28 @@ impl TaskManager {
     }
     /// Take a process out of the ready queue
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
-        self.ready_queue.pop_front()
+        // directly get the first process as the result when using FIFO scheduling algorithm
+        // self.ready_queue.pop_front()
+
+        // get the process as the result which has the minimum stride when using stride scheduling
+        if let Some(result_task)=self.ready_queue.iter().enumerate()
+            .min_by_key(|&(_,task)|{
+                let inner=task.inner_exclusive_access();
+                if inner.task_status==TaskStatus::Ready{
+                    inner.stride
+                }else{
+                    usize::MAX
+                }
+            }).map(|(_,task)| task)
+        {
+            if result_task.inner_exclusive_access().task_status==TaskStatus::Ready{
+                Some(result_task.clone())
+            }else{
+                None
+            }
+        }else{
+            None
+        }
     }
 }
 
