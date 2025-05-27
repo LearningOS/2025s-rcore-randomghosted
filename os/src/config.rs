@@ -26,3 +26,6 @@ pub const MMIO: &[(usize, usize)] = &[(0x10001000, 0x1000)];
 
 /// Big stride constant used to calculate pass
 pub const BIG_STRIDE: usize = 65536;
+
+/// DISK FILE TYPE ID
+pub const DISK_FILE_TYPE_ID: usize = 1;

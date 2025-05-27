@@ -1,7 +1,8 @@
 //! File and filesystem-related syscalls
-use crate::fs::{open_file, OpenFlags, Stat};
+use crate::fs::{open_file, OpenFlags, Stat, OSInode, StatMode};
 use crate::mm::{translated_byte_buffer, translated_str, UserBuffer};
 use crate::task::{current_task, current_user_token};
+use alloc::sync::Arc;
 
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
     trace!("kernel:pid[{}] sys_write", current_task().unwrap().pid.0);
@@ -77,11 +78,45 @@ pub fn sys_close(fd: usize) -> isize {
 
 /// YOUR JOB: Implement fstat.
 pub fn sys_fstat(_fd: usize, _st: *mut Stat) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_fstat NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    let task=current_task().unwrap();
+    let task_inner=task.inner_exclusive_access();
+
+    if _fd>=task_inner.fd_table.len() || task_inner.fd_table[_fd].is_none(){
+        return -1;
+    }
+
+    let file_inode=task_inner.fd_table[_fd].clone().unwrap();
+    drop(task_inner);
+
+    // check if the fd is corresponding to the disk file or not
+    if !file_inode.is_disk_file(){
+        return -1;
+    }
+
+    // transform to the OSInode
+    let file_inode= unsafe{ Arc::from_raw(Arc::into_raw(file_inode) as *const _ as *const OSInode) };
+
+    let mut stat=Stat::default();
+    stat.ino=file_inode.get_inode_id() as u64;
+    if file_inode.is_file(){
+        stat.mode=StatMode::FILE;
+    }else if file_inode.is_directory(){
+        stat.mode=StatMode::DIR;
+    }else{
+        stat.mode=StatMode::NULL;
+    }
+    stat.nlink=file_inode.get_num_of_hard_links();
+
+    let stat_slice=unsafe {core::slice::from_raw_parts(&stat as *const _ as *const u8, core::mem::size_of::<Stat>()) };
+    let mut target_stat_slice=translated_byte_buffer(current_user_token(),_st as *mut _ as *mut u8, core::mem::size_of::<Stat>());
+    let mut count=0;
+    for i in 0..target_stat_slice.len(){
+        let len_=target_stat_slice[i].len();
+        target_stat_slice[i].copy_from_slice(&stat_slice[count..count+len_]);
+        count+=len_;
+    }
+
+    0
 }
 
 /// YOUR JOB: Implement linkat.

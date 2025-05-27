@@ -2,6 +2,7 @@ use super::{get_block_cache, BlockDevice, BLOCK_SZ};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt::{Debug, Formatter, Result};
+use core::convert::TryInto;
 
 /// Magic number for sanity check
 const EFS_MAGIC: u32 = 0x3b800001;
@@ -99,6 +100,8 @@ impl DiskInode {
         self.indirect1 = 0;
         self.indirect2 = 0;
         self.type_ = type_;
+
+        self.nlink=1;
     }
     /// Whether this inode is a directory
     pub fn is_dir(&self) -> bool {
@@ -248,16 +251,16 @@ impl DiskInode {
             return -1;
         }
         self.nlink+=1;
-        self.nlink
+        self.nlink.try_into().unwrap()
     }
 
     /// subtract the link by 1
     pub fn subtract_link(&mut self)->isize{
         if self.nlink<=0{return -1;}
         self.nlink-=1;
-        self.nlink
+        self.nlink.try_into().unwrap()
     }
-
+        
     /// Clear size to zero and return blocks that should be deallocated.
     /// We will clear the block contents to zero later.
     pub fn clear_size(&mut self, block_device: &Arc<dyn BlockDevice>) -> Vec<u32> {

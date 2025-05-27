@@ -4,6 +4,7 @@ mod inode;
 mod stdio;
 
 use crate::mm::UserBuffer;
+use crate::config;
 
 /// trait File for all file types
 pub trait File: Send + Sync {
@@ -15,6 +16,16 @@ pub trait File: Send + Sync {
     fn read(&self, buf: UserBuffer) -> usize;
     /// write to the file from buf, return the number of bytes written
     fn write(&self, buf: UserBuffer) -> usize;
+
+    /// get the type of the file
+    fn get_type(&self)->usize{
+        0
+    }
+
+    /// is disk file or not
+    fn is_disk_file(&self)->bool{
+        self.get_type()==config::DISK_FILE_TYPE_ID
+    }
 }
 
 /// The stat of a inode
@@ -31,6 +42,19 @@ pub struct Stat {
     pub nlink: u32,
     /// unused pad
     pad: [u64; 7],
+}
+
+impl Stat{
+    /// new a default Stat
+    pub fn default()->Self{
+        Self{
+            dev:0,
+            ino:0,
+            mode:StatMode::NULL,
+            nlink:0,
+            pad:[0u64;7]
+        }
+    }
 }
 
 bitflags! {

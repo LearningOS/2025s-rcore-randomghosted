@@ -6,6 +6,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use spin::{Mutex, MutexGuard};
+use crate::BLOCK_SZ;
 /// Virtual filesystem layer over easy-fs
 pub struct Inode {
     block_id: usize,
@@ -209,12 +210,22 @@ impl Inode{
     }
 }
 
+/// other helper function
+impl Inode{
+    /// get the inode_id from block_id and block_offset
+    pub fn get_inode_id(&self)->u32{
+        let inode_per_block=BLOCK_SZ/(core::mem::size_of::<DiskInode>());
+        let id= self.block_id* inode_per_block + self.block_offset/(core::mem::size_of::<DiskInode>());
+        id as u32
+    }
+}
+
 /// link the new file path to the old file path, hard link
 pub fn linkat(old_path:&str, new_path:&str, where_to_link:&Inode)->isize{
-
+    -1
 }
 
 /// unlink the file path 
 pub fn unlinkat(path:&str,where_to_unlink:&Inode)->isize{
-
+    -1
 }

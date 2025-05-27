@@ -13,6 +13,7 @@ use alloc::vec::Vec;
 use bitflags::*;
 use easy_fs::{EasyFileSystem, Inode};
 use lazy_static::*;
+use crate::config::DISK_FILE_TYPE_ID;
 
 /// inode in memory
 /// A wrapper around a filesystem inode
@@ -52,6 +53,28 @@ impl OSInode {
             v.extend_from_slice(&buffer[..len]);
         }
         v
+    }
+
+    /// get num of hard links
+    pub fn get_num_of_hard_links(&self)->u32{
+        let inner=self.inner.exclusive_access();
+        inner.inode.get_num_of_links() as u32
+    }
+
+    /// get inode id
+    pub fn get_inode_id(&self)->u32{
+        let inner=self.inner.exclusive_access();
+        inner.inode.get_inode_id()
+    }
+
+    ///is file or not
+    pub fn is_file(&self)->bool{
+        self.inner.exclusive_access().inode.is_file()
+    }
+
+    ///is directory or not
+    pub fn is_directory(&self)->bool{
+        self.inner.exclusive_access().inode.is_directory()
     }
 }
 
@@ -155,5 +178,9 @@ impl File for OSInode {
             total_write_size += write_size;
         }
         total_write_size
+    }
+
+    fn get_type(&self)->usize{
+        DISK_FILE_TYPE_ID
     }
 }
