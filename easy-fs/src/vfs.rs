@@ -184,3 +184,37 @@ impl Inode {
         block_cache_sync_all();
     }
 }
+
+/// impl the get stat function
+impl Inode{
+    /// is file or not
+    pub fn is_file(&self)->bool{
+        self.read_disk_inode(|disk_inode:&DiskInode|->bool{
+            disk_inode.is_file()
+        })
+    }
+
+    /// is directory or not
+    pub fn is_directory(&self)->bool{
+        self.read_disk_inode(|disk_inode:&DiskInode|->bool{
+            disk_inode.is_dir()
+        })
+    }
+
+    /// get num of hard links
+    pub fn get_num_of_links(&self)->u32{
+        self.read_disk_inode(|disk_inode:&DiskInode|->u32{
+            disk_inode.nlink
+        })
+    }
+}
+
+/// link the new file path to the old file path, hard link
+pub fn linkat(old_path:&str, new_path:&str, where_to_link:&Inode)->isize{
+
+}
+
+/// unlink the file path 
+pub fn unlinkat(path:&str,where_to_unlink:&Inode)->isize{
+
+}

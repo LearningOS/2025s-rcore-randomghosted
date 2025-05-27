@@ -6,7 +6,8 @@ use core::fmt::{Debug, Formatter, Result};
 /// Magic number for sanity check
 const EFS_MAGIC: u32 = 0x3b800001;
 /// The max number of direct inodes
-const INODE_DIRECT_COUNT: usize = 28;
+const INODE_DIRECT_COUNT: usize = 27; // change 28 to 27 to meet the need to add a new member:
+                                      // links
 /// The max length of inode name
 const NAME_LENGTH_LIMIT: usize = 27;
 /// The max number of indirect1 inodes
@@ -82,6 +83,7 @@ type DataBlock = [u8; BLOCK_SZ];
 #[repr(C)]
 pub struct DiskInode {
     pub size: u32,
+    pub nlink: u32,
     pub direct: [u32; INODE_DIRECT_COUNT],
     pub indirect1: u32,
     pub indirect2: u32,
@@ -233,6 +235,27 @@ impl DiskInode {
                     }
                 }
             });
+    }
+
+    /// decrease the file size
+    pub fn decrease_size(&mut self, new_size:usize, block_device:&Arc<dyn BlockDevice>){
+        
+    }
+
+    /// add the link by 1
+    pub fn add_link(&mut self)->isize{
+        if self.nlink==u32::MAX{
+            return -1;
+        }
+        self.nlink+=1;
+        self.nlink
+    }
+
+    /// subtract the link by 1
+    pub fn subtract_link(&mut self)->isize{
+        if self.nlink<=0{return -1;}
+        self.nlink-=1;
+        self.nlink
     }
 
     /// Clear size to zero and return blocks that should be deallocated.
@@ -388,6 +411,7 @@ impl DiskInode {
         write_size
     }
 }
+
 /// A directory entry
 #[repr(C)]
 pub struct DirEntry {
