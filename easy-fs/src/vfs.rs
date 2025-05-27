@@ -43,7 +43,7 @@ impl Inode {
             .modify(self.block_offset, f)
     }
     /// Find inode under a disk inode by name
-    fn find_inode_id(&self, name: &str, disk_inode: &DiskInode) -> Option<u32> {
+    fn find_inode_id(&self, name: &str, disk_inode: &DiskInode) -> Option<(usize,u32)> {
         // assert it is a directory
         assert!(disk_inode.is_dir());
         let file_count = (disk_inode.size as usize) / DIRENT_SZ;
@@ -54,7 +54,7 @@ impl Inode {
                 DIRENT_SZ,
             );
             if dirent.name() == name {
-                return Some(dirent.inode_id() as u32);
+                return Some((i,dirent.inode_id() as u32));
             }
         }
         None
@@ -63,7 +63,7 @@ impl Inode {
     pub fn find(&self, name: &str) -> Option<Arc<Inode>> {
         let fs = self.fs.lock();
         self.read_disk_inode(|disk_inode| {
-            self.find_inode_id(name, disk_inode).map(|inode_id| {
+            self.find_inode_id(name, disk_inode).map(|(_idx,inode_id)| {
                 let (block_id, block_offset) = fs.get_disk_inode_pos(inode_id);
                 Arc::new(Self::new(
                     block_id,
@@ -74,6 +74,22 @@ impl Inode {
             })
         })
     }
+    /// Find inode under current inode by name with the index in the directory returned
+    pub fn find_and_get_idx(&self, name: &str) -> Option<(usize,Arc<Inode>)> {
+        let fs = self.fs.lock();
+        self.read_disk_inode(|disk_inode| {
+            self.find_inode_id(name, disk_inode).map(|(idx,inode_id)| {
+                let (block_id, block_offset) = fs.get_disk_inode_pos(inode_id);
+                (idx,Arc::new(Self::new(
+                    block_id,
+                    block_offset,
+                    self.fs.clone(),
+                    self.block_device.clone(),
+                )))
+            })
+        })
+    }
+
     /// Increase the size of a disk inode
     fn increase_size(
         &self,
@@ -184,6 +200,11 @@ impl Inode {
         });
         block_cache_sync_all();
     }
+
+    /// Clear the disk inode block for the file, and itself should be destruct
+    pub fn clear_inode(&self){
+        self.fs.lock().dealloc_inode(self.block_id as usize, self.block_offset as usize);
+    }
 }
 
 /// impl the get stat function
@@ -233,6 +254,30 @@ impl Inode{
             );
         });
     }
+
+    /// delete the file, with dealloc data, inode and file entry
+    fn delete_file(&mut self, name:&str)->isize{
+        if !self.is_directory(){return -1;}
+        let result=self.find_and_get_idx(name);
+        if result.is_none(){return -1;}
+        let idx=result.0;
+        let inode=result.1;
+
+        // clear the data and inode
+        self.clear();
+        self.clear_inode();
+
+        let current_size=self.size;
+        let mut after_size=current_size-DIRENT_SZ;
+        inode.modify_disk_inode(|disk_inode:&mut DiskInode|{
+            let buf=[0usize;DIRENT_SZ];
+            self.read_at(current_size-DIRENT_SZ,&mut buf);
+            inode.write_at(idx*DIRENT_SZ,&buf);
+        });
+
+        inode.decrease_size(after_size,&self.block_device);
+        0
+    }
 }
 
 /// link the new file path to the old file path, hard link
@@ -261,6 +306,18 @@ pub fn linkat(old_path:&str, new_path:&str, where_to_link:&Arc<Inode>)->isize{
 }
 
 /// unlink the file path 
-pub fn unlinkat(path:&str,where_to_unlink:&Inode)->isize{
+pub fn unlinkat(path:&str,where_to_unlink:&Arc<Inode>)->isize{
+    if !where_to_unlink.is_directory(){return -1;}
+    let file_inode=where_to_unlink.find(path);
+    if file_inode.is_none(){return -1;}
+    let file_inode=file_inode.unwrap();
+
+    let current_link=file_inode.get_num_of_links();
+    assert(current_link>0);
+    if current_link>1{
+        file_inode.modify_disk_inode(|disk_inode:&mut DiskInode|{
+            disk_inode.subtract_link();
+        })
+    }
     -1
 }
