@@ -214,13 +214,12 @@ impl Inode{
 impl Inode{
     /// get the inode_id from block_id and block_offset
     pub fn get_inode_id(&self)->u32{
-        let inode_per_block=BLOCK_SZ/(core::mem::size_of::<DiskInode>());
-        let id= self.block_id* inode_per_block + self.block_offset/(core::mem::size_of::<DiskInode>());
-        id as u32
+        self.fs.lock().get_inode_id(self.block_id as usize, self.block_offset as usize)
     }
 
     /// append an file entry in the directory, but not alloc any inode
     fn append_file_entry(&self, file_entry:DirEntry){
+        let mut fs=self.fs.lock();
         self.modify_disk_inode(|disk_inode:&mut DiskInode| {
             // append file in the dirent
             let file_count = (disk_inode.size as usize) / DIRENT_SZ;
@@ -238,7 +237,7 @@ impl Inode{
 
 /// link the new file path to the old file path, hard link
 pub fn linkat(old_path:&str, new_path:&str, where_to_link:&Arc<Inode>)->isize{
-    if !where_to_link.is_dir(){return -1;}
+    if !where_to_link.is_directory(){return -1;}
     let old_file_inode=where_to_link.find(old_path);
     let new_file_inode=where_to_link.find(new_path);
     if old_file_inode.is_none() || new_file_inode.is_some(){
@@ -247,12 +246,12 @@ pub fn linkat(old_path:&str, new_path:&str, where_to_link:&Arc<Inode>)->isize{
 
     let old_file_inode=old_file_inode.unwrap();
     let old_file_inode_id=old_file_inode.get_inode_id();
-    let mut dirent=DirEntry::new(new_path,old_file_inode_id);
+    let dirent=DirEntry::new(new_path,old_file_inode_id);
  
     let add_link_result=old_file_inode.modify_disk_inode(|disk_inode:&mut DiskInode|->isize{
         disk_inode.add_link() 
     });
-    if add_link==-1{
+    if add_link_result==-1{
         return -1;
     }else{
         where_to_link.append_file_entry(dirent);
