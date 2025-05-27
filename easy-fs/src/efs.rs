@@ -157,15 +157,15 @@ impl EasyFileSystem {
     }
     /// Deallocate a disk inode
     pub fn dealloc_inode(&mut self, block_id:usize, block_offset:usize){
-        get_block_cache(block_id as usize, Arc::clone(&self.block))
+        get_block_cache(block_id as usize, Arc::clone(&self.block_device))
             .lock()
             .modify(block_offset, |disk_inode:&mut DiskInode|{
-                let mut slice=unsafe{core::slice::from_raw_parts_mut(disk_inode as &mut _ as &mut u8, core::mem::size_of::<DiskInode>())};
+                let slice=unsafe{core::slice::from_raw_parts_mut(disk_inode as *mut _ as *mut u8, core::mem::size_of::<DiskInode>())};
                 slice.iter_mut().for_each(|p|{
                     *p=0;
                 })
             });
-        let inode_id=(self.get_inode_id(block_id,block_offset) as usize)
+        let inode_id=self.get_inode_id(block_id,block_offset) as usize;
         self.inode_bitmap.dealloc(
             &self.block_device,
             inode_id

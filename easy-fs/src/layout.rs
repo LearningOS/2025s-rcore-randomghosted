@@ -1,4 +1,4 @@
-use super::{get_block_cache, BlockDevice, BLOCK_SZ};
+use super::{block_cache_sync_all,get_block_cache, BlockDevice, BLOCK_SZ};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt::{Debug, Formatter, Result};
@@ -242,15 +242,15 @@ impl DiskInode {
 
     /// decrease the file size
     pub fn decrease_size(&mut self, new_size:usize, block_device:&Arc<dyn BlockDevice>)->Vec<u32>{
-        let mut origin_blocks=self.data_blocks();
-        self.size=new_size;
-        let current_blocks=self.data_blocks();
+        let mut origin_blocks=self.data_blocks() as usize;
+        self.size=new_size as u32;
+        let current_blocks=self.data_blocks() as usize;
         
         if current_blocks>=origin_blocks{
             return Vec::new();
         }
 
-        let dealloc_data_block_vec=Vec::new();
+        let mut dealloc_data_block_vec=Vec::new();
 
         if origin_blocks>INDIRECT2_BOUND{
             let inter1=origin_blocks-INDIRECT2_BOUND;
@@ -267,20 +267,20 @@ impl DiskInode {
                 b1-=1;
             }
 
-            get_block_cache(self.indirect2,Arc::clone(block_device))
+            get_block_cache(self.indirect2 as usize,Arc::clone(block_device))
                 .lock()
                 .modify(0,|indirect_block:&mut IndirectBlock|{
                     while a1>a0 || (a1==a0 && b1>b0){
-                        get_block_cache(indirect_block[a1],Arc::clone(block_device))
+                        get_block_cache(indirect_block[a1] as usize,Arc::clone(block_device))
                             .lock()
                             .modify(0,|inner_indirect_block:&mut IndirectBlock|{
                                 dealloc_data_block_vec.push(inner_indirect_block[b1]);  
                                 inner_indirect_block[b1]=0;
-                            })
+                            });
                         if b1==0{b1=INODE_INDIRECT1_COUNT;a1-=1;}
                         else{b1-=1;}
                     }
-                })
+                });
 
             origin_blocks=current_blocks.max(INDIRECT1_BOUND);
         }
@@ -291,7 +291,7 @@ impl DiskInode {
             
             inter1-=1;
 
-            get_block_cache(self.indirect1, Arc::clone(&block_device))
+            get_block_cache(self.indirect1 as usize, Arc::clone(&block_device))
                 .lock()
                 .modify(0,|indirect_block:&mut IndirectBlock|{
                     while inter1>inter0{
@@ -299,7 +299,7 @@ impl DiskInode {
                         indirect_block[inter1]=0;
                         inter1-=1;
                     }
-                })
+                });
 
             origin_blocks=inter0;
         }

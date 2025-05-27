@@ -3,7 +3,7 @@ use crate::fs::{open_file, OpenFlags, Stat, OSInode, StatMode, ROOT_INODE};
 use crate::mm::{translated_byte_buffer, translated_str, UserBuffer};
 use crate::task::{current_task, current_user_token};
 use alloc::sync::Arc;
-use easy_fs::{linkat};
+use easy_fs::{linkat,unlinkat};
 
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
     trace!("kernel:pid[{}] sys_write", current_task().unwrap().pid.0);
