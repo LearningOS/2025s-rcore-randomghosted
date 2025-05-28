@@ -127,6 +127,9 @@ impl OpenFlags {
 
 /// Open a file
 pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
+
+    assert!(ROOT_INODE.is_directory());
+
     let (readable, writable) = flags.read_write();
     if flags.contains(OpenFlags::CREATE) {
         if let Some(inode) = ROOT_INODE.find(name) {
@@ -140,7 +143,8 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
                 .map(|inode| Arc::new(OSInode::new(readable, writable, inode)))
         }
     } else {
-        ROOT_INODE.find(name).map(|inode| {
+        let inter=ROOT_INODE.find(name);
+        inter.map(|inode| {
             if flags.contains(OpenFlags::TRUNC) {
                 inode.clear();
             }

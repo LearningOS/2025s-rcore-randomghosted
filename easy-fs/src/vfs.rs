@@ -61,6 +61,8 @@ impl Inode {
     }
     /// Find inode under current inode by name
     pub fn find(&self, name: &str) -> Option<Arc<Inode>> {
+        assert!(self.is_directory());
+
         let fs = self.fs.lock();
         self.read_disk_inode(|disk_inode| {
             self.find_inode_id(name, disk_inode).map(|(_idx,inode_id)| {
@@ -76,6 +78,8 @@ impl Inode {
     }
     /// Find inode under current inode by name with the index in the directory returned
     pub fn find_and_get_idx(&self, name: &str) -> Option<(usize,Arc<Inode>)> {
+        assert!(self.is_directory());
+
         let fs = self.fs.lock();
         self.read_disk_inode(|disk_inode| {
             self.find_inode_id(name, disk_inode).map(|(idx,inode_id)| {
@@ -112,12 +116,13 @@ impl Inode {
     /// before decreasing the size, work must be done to make sure that the shrinked space is
     /// translate
     fn decrease_size(&self, new_size:u32, disk_inode:&mut DiskInode, fs:&mut MutexGuard<EasyFileSystem>){
-        let current_size=self.read_disk_inode(|disk_inode:&DiskInode|->usize{
-            disk_inode.size as usize
-        });
+        let current_size=disk_inode.size as usize;
         let new_size=new_size as usize;
-        if new_size>=current_size{return;}
-        assert!(false);
+        if new_size>=current_size{
+            disk_inode.size=new_size as u32;
+            return;
+        }
+        
         let dealloc_data_block_id=disk_inode.decrease_size(new_size,&self.block_device);
         dealloc_data_block_id.iter().enumerate().for_each(|(_,block_id)|{
             fs.dealloc_data(*block_id as u32);
@@ -126,6 +131,8 @@ impl Inode {
 
     /// Create inode under current inode by name
     pub fn create(&self, name: &str) -> Option<Arc<Inode>> {
+        assert!(self.is_directory());
+
         let mut fs = self.fs.lock();
         let op = |root_inode: &DiskInode| {
             // assert it is a directory
@@ -273,7 +280,7 @@ impl Inode{
     }
 
     /// delete the file, with dealloc data, inode and file entry
-    fn delete_file(& self, name:&str)->isize{
+    fn delete_file(&self, name:&str)->isize{
         if !self.is_directory(){return -1;}
         let result=self.find_and_get_idx(name);
         if result.is_none(){return -1;}
@@ -282,20 +289,20 @@ impl Inode{
         let inode=result.1;
 
         // clear the data and inode
-        self.clear();
-        self.clear_inode();
+        inode.clear();
+        inode.clear_inode();
         
         let current_size=self.read_disk_inode(|disk_inode:&DiskInode|->usize{
             disk_inode.size as usize
         });
-        let mut after_size=current_size-DIRENT_SZ;
+        let after_size=current_size-DIRENT_SZ;
         let mut buf=[0u8;DIRENT_SZ];
         self.read_at(current_size-DIRENT_SZ,&mut buf);
-        inode.write_at(idx*DIRENT_SZ,&buf);
+        self.write_at(idx*DIRENT_SZ,&buf);
 
         let mut fs=inode.fs.lock();
-        inode.modify_disk_inode(|disk_inode:&mut DiskInode|{
-            inode.decrease_size(after_size as u32,disk_inode,&mut fs);
+        self.modify_disk_inode(|disk_inode:&mut DiskInode|{
+            self.decrease_size(after_size as u32,disk_inode,&mut fs);
         });
         0
     }
@@ -336,10 +343,10 @@ pub fn unlinkat(path:&str,where_to_unlink:&Arc<Inode>)->isize{
     let current_link=file_inode.get_num_of_links();
     assert!(current_link>0);
     
-     file_inode.modify_disk_inode(|disk_inode:&mut DiskInode|{
-         disk_inode.subtract_link();
-     })
-    if current_link==0{
+    file_inode.modify_disk_inode(|disk_inode:&mut DiskInode|{
+        disk_inode.subtract_link();
+    });
+    if current_link==1{
         return where_to_unlink.clone().delete_file(path);
     }
     0
