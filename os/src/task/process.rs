@@ -13,6 +13,7 @@ use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
+use alloc::collections::BTreeMap;
 use core::cell::RefMut;
 
 /// Process Control Block
@@ -49,6 +50,22 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+
+    /// is allowed to detect deadlock?
+    pub enable_detect_deadlock: bool,
+
+    /// available sources for mutex
+    pub available_mutex: Vec<u8>,
+    /// available sources for semaphore
+    pub available_semaphore: Vec<u8>,
+    /// need matrix for mutex
+    pub need_matrix_for_mutex: BTreeMap<usize, BTreeMap<usize,u8>>,
+    /// need matrix for semaphore
+    pub need_matrix_for_semaphore: BTreeMap<usize, BTreeMap<usize,u8>>,
+    /// allocation matrix for mutex
+    pub alloc_matrix_for_mutex: BTreeMap<usize, BTreeMap<usize, u8>>,
+    /// allocation matrix for semaphore
+    pub alloc_matrix_for_semaphore: BTreeMap<usize, BTreeMap<usize,u8>>,
 }
 
 impl ProcessControlBlockInner {
@@ -81,6 +98,10 @@ impl ProcessControlBlockInner {
     /// get a task with tid in this process
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
+    }
+    /// set if enable the deadlock detect
+    pub fn set_deadlock_detect(&mut self, enabled: bool){
+        self.enable_detect_deadlock=enabled;
     }
 }
 
@@ -119,6 +140,11 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    enable_detect_deadlock:false,
+
+                    available_mutex:Vec::new(),
+                    available_semaphore:Vec::new(),
+                    need_matrix:BTreeMap::new()
                 })
             },
         });
@@ -281,5 +307,175 @@ impl ProcessControlBlock {
     /// get pid
     pub fn getpid(&self) -> usize {
         self.pid.0
+    }
+
+    /// set if enabled deadlock detect
+    pub fn set_deadlock_detect(&self,enabled:bool){
+        let mut inner=self.inner_exclusive_access();
+        inner.set_deadlock_detect(enabled);
+    }
+
+    /// get the value for the id key of tid btreemap
+    pub fn get_from_btreemap(&self: BTreeMap<usize, BTreeMap<usize,u8>>, tid:usize, lock_id:usize)->Option<u8>{
+        match self.find(tid){
+            None=>{return None;},
+            Some(tree)=>{
+                match tree.find(lock_id){
+                    None=>{return None;},
+                    Some(v)=>{return Some(v);}
+                }
+            }
+        }
+    }
+
+    /// add or subtract the value for the id key of the tid btreemap
+    pub fn change_from_btreemap(&mut self: BTreeMap<usize, BTreeMap<usize,u8>>, 
+            tid:usize, lock_id:usize, increment:u8)->Option<u8>{
+        match self.find(tid){
+            None=>{return None;},
+            Some(tree)=>{
+                match tree.find(lock_id){
+                    None=>{return None;},
+                    Some(v)=>{
+                        v+=increment;
+                        return Some(v);
+                    }
+                }
+            }
+        }
+    }
+
+    /// remove the tid btreemap from the btreemap
+    pub fn remove_from_btreemap(&mut self: BTreeMap<usize, BTreeMap<usize,u8>>, tid:usize){
+        self.remove(tid);
+    }
+
+    /// examine that if the deadlock would occur if lock is permitted
+    /// either mutex_id or semaphore_id is valid, the invalid one should be -1 
+    /// return true if deadlock is detected
+    pub fn detect_deadlock(&self, tid: usize,,_mutex_id:usize, _semaphore_id:usize)->bool{
+        // if both id are negative or positive
+        if _mutex_id * _semaphore_id>0{
+            return false;
+        }
+        
+        let mut inner=self.inner_exclusive_access();
+        let task_count=inner.thread_count();
+
+        if _mutex_id==-1{
+        // semaphore id is valid
+            // write the need matrix
+            let mut btreemap=
+                match inner.need_matrix_for_semaphore.find(tid){
+                    None=>{
+                        let mut newBtree=BTreeMap::new();
+                        newBtree.insert(_semaphore_id,1);
+                        inner.need_matrix_for_semaphore.insert(tid,newBtree);
+                        return newBtree;
+                    },
+                    Some(btreemap_inner)=>{
+                        let result=btreemap_inner.find(_semaphore_id);
+                        if result.is_none(){
+                            btreemap_inner.insert(_semaphore_id,1);
+                        }else{
+                            let result=result.unwrap();
+                            btreemap_inner.insert(_semaphore_id,result+1);
+                        }
+                        return btreemap_inner;
+                    }
+            };
+            
+            let detect_result=bank_algo(inner.available_semaphore.clone(),inner.need_matrix_for_semaphore.clone(),
+                inner.alloc_matrix_for_semaphore.clone(),
+                task_count,inner.semaphore_list.len()
+            );
+        
+            return detect_result;
+
+        }else{
+        // mutex id is valid
+            let btreemap=match inner.need_matrix_for_mutex.find(tid){
+                Some(btree)=>{
+                    let result=match btree.find(_mutex_id){
+                        Some(r)=>{r}, None=>{0}
+                    };
+                    btree.insert(_mutex_id,result+1);
+                    return btree;
+                },
+                None=>{
+                    let mut btree=BTreeMap::new();
+                    btree.insert(_mutex_id,1);
+                    inner.need_matrix_for_mutex.insert(tid, btree);
+                    return btree;
+                }
+            };
+
+            let detect_result=bank_algo(inner.available_mutex.clone(),inner.need_matrix_for_mutex.clone(),
+                inner.alloc_matrix_for_mutex.clone(),
+                task_count,inner.mutex_list.len()
+            );
+
+            return detect_result;
+        }
+    }
+
+    fn bank_algo(available: Vec<u8>,need_matrix:&BTreeMap,alloc_matrix:&BTreeMap, task_count:usize, lock_count:usize)
+        ->bool{
+        let mut finish=Vec::new(task_count,false);
+        let check_finish=|finish_vec:&Vec<bool>|->bool{
+            for i in 0..finish_vec.len(){
+                if finish_vec[i]==false{
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        while check_finish(&finish){
+            let sources_vec=Vec::new(lock_count,0);
+            let target_thread=finish.iter().enumerate().find(|(idx,val)|->{
+                let need_tree=need_matrix.find(idx);
+                if need_tree.is_some(){
+                    let need_tree=need_tree.unwrap();
+                    for i in 0..lock_count{
+                        match need_tree.find(i){
+                            Some(v)=>{
+                                sources_vec[i]=v;
+                            },
+                            None=>{
+                                sources_vec[i]=0;
+                            }
+                        }
+                    }
+                }
+                let mut is_not_bigger=true;
+                for i in 0..sources_vec.len(){
+                    if sources_vec[i]>available[i]{
+                        is_not_bigger=false;
+                    }
+                }
+
+                return is_not_bigger && !val
+            }).map(|(idx,_)| {idx});
+
+            if target_thread.is_none(){return true;}
+            let target_thread=target_thread.unwrap();
+            finish[target_thread]=true;
+            let need_tree=need_matrix.find(target_thread);
+            let alloc_tree=alloc_matrix.find(target_thread);
+            for i in 0..lock_count{
+                available[i]+=(
+                    match alloc_tree{
+                        Some(tree)=>{
+                            match tree.find(i){Some(v)=>{v},_=>{0}}
+                        },
+                        _=>{0}
+                });
+            }
+            need_matrix.remove(target_thread);
+            alloc_matrix.remove(target_thread);
+        }
+
+        false
     }
 }
