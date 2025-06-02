@@ -38,6 +38,7 @@ pub use processor::{
 };
 pub use signal::SignalFlags;
 pub use task::{TaskControlBlock, TaskStatus};
+pub use process::{CrudForBTreeMap};
 
 /// Make current task suspended and switch to the next task
 pub fn suspend_current_and_run_next() {
@@ -208,5 +209,6 @@ pub fn remove_inactive_task(task: Arc<TaskControlBlock>) {
 /// has the current process enables deadlock detect?
 pub fn is_current_enabled_deadlock_detect()->bool{
     let process=current_process();
-    process.enable_deadlock_detect
+    let process_inner=process.inner_exclusive_access();
+    process_inner.enable_detect_deadlock
 }

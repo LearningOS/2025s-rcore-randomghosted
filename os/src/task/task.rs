@@ -29,10 +29,10 @@ impl TaskControlBlock {
         inner.memory_set.token()
     }
     /// Get tid
-    pub fn gettid(&self)->usize{
-        match self.inner_exclusive_access().res{
-            Some(r)=>{r.tid as usize},
-            None=>{-1}
+    pub fn gettid(&self)->Option<usize>{
+        match &self.inner_exclusive_access().res{
+            Some(r)=>{Some(r.tid as usize)},
+            None=>{None}
         }
     }
 }
