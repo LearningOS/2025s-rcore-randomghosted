@@ -258,6 +258,8 @@ impl ProcessControlBlock {
                 new_fd_table.push(None);
             }
         }
+        // copy lock-related data structure
+
         // create child process pcb
         let child = Arc::new(Self {
             pid,
@@ -338,30 +340,11 @@ impl ProcessControlBlock {
             return false;
         }
         
-        let mut inner=self.inner_exclusive_access();
+        let inner=self.inner_exclusive_access();
         let task_count=inner.thread_count();
 
         if _mutex_id.is_none(){
         // semaphore id is valid
-            let _semaphore_id=_semaphore_id.unwrap();
-            // write the need matrix
-            
-                match inner.need_matrix_for_semaphore.get_mut(&tid){
-                    None=>{
-                        let mut new_btree=BTreeMap::new();
-                        new_btree.insert(_semaphore_id,1);
-                        inner.need_matrix_for_semaphore.insert(tid,new_btree);
-                    },
-                    Some(btreemap_inner)=>{
-                        let result=btreemap_inner.get(&_semaphore_id);
-                        if result.is_none(){
-                            btreemap_inner.insert(_semaphore_id,1);
-                        }else{
-                            let result=result.unwrap();
-                            btreemap_inner.insert(_semaphore_id,result+1);
-                        }
-                    }
-                }
             
             let detect_result=Self::bank_algo(tid,&mut inner.available_semaphore.clone(),&mut inner.need_matrix_for_semaphore.clone(),
                 &mut inner.alloc_matrix_for_semaphore.clone(),
@@ -372,21 +355,6 @@ impl ProcessControlBlock {
 
         }else{
         // mutex id is valid
-            let _mutex_id=_mutex_id.unwrap();
-            match inner.need_matrix_for_mutex.get_mut(&tid){
-                Some(btree)=>{
-                    let result=match btree.get(&_mutex_id){
-                        Some(r)=>{r}, None=>{&0}
-                    };
-                    btree.insert(_mutex_id,result+1);
-                },
-                None=>{
-                    let mut btree=BTreeMap::new();
-                    btree.insert(_mutex_id,1);
-                    inner.need_matrix_for_mutex.insert(tid, btree);
-                }
-            }
-
             let detect_result=Self::bank_algo(tid, &mut inner.available_mutex.clone(),&mut inner.need_matrix_for_mutex.clone(),
                 &mut inner.alloc_matrix_for_mutex.clone(),
                 task_count,inner.mutex_list.len()
@@ -416,10 +384,12 @@ impl ProcessControlBlock {
 
         while check_finish(&finish){
         
-            println!("check");
-            let mut sources_vec=Vec::new();
-            for _i in 0..lock_count{sources_vec.push(0usize);}
             let target_thread=finish.iter().enumerate().find(|(idx,val)|->bool{
+                if **val==true{return false;}
+                
+                let mut sources_vec=Vec::new();
+                for _i in 0..lock_count{sources_vec.push(0usize);}
+ 
                 let need_tree=need_matrix.get(&idx);
                 if need_tree.is_some(){
                     let need_tree=need_tree.unwrap();
@@ -440,11 +410,12 @@ impl ProcessControlBlock {
                         is_not_bigger=false;
                     }
                 }
-
-                return is_not_bigger && (!*val)
+                return is_not_bigger && (!(**val))
             }).map(|(idx,_)| {idx});
 
-            if target_thread.is_none(){return true;}
+            if target_thread.is_none(){ 
+                return true;
+            }
             let target_thread=target_thread.unwrap();
             finish[target_thread]=true;
             
@@ -458,17 +429,21 @@ impl ProcessControlBlock {
                         _=>{&0}
                 } as usize;
             }
+
+            println!("target_thread: {}", target_thread);
             need_matrix.remove(&target_thread);
             alloc_matrix.remove(&target_thread);
         }
 
         // at the end, compare the need vec of the request one and the available
+        println!("task_id: {}",task_id);
         match need_matrix.get(&task_id){
-            None=>{return false;},
+            None=>{ return false;},
             Some(btree)=>{
                 for i in 0..lock_count{
                     match btree.get(&i){
                         Some(val)=>{
+                            println!("at {}, {} > {} ?",i, *val, available[i]);
                             if usize::from(*val)>available[i]{
                                 return true;
                             }
@@ -511,19 +486,30 @@ impl CrudForBTreeMap for BTreeMap<usize,  BTreeMap<usize, u8>>{
     /// add or subtract the value for the id key of the tid btreemap
     fn change_from_btreemap(&mut self, tid:usize, lock_id:usize, increment:i8)->Option<u8>{
         match self.get_mut(&tid){
-            None=>{return None;},
+            None=>{
+                if increment<=0{return None;}
+
+                let mut new_tree:BTreeMap<usize, u8>=BTreeMap::new();
+                new_tree.insert(lock_id,increment as u8);
+                self.insert(tid, new_tree);
+                return Some(increment as u8);
+            },
             Some(tree)=>{
                 let is_pos_or_zero=increment >=0;
 
                 match tree.get_mut(&lock_id){
-                    None=>{return None;},
+                    None=>{
+                        if increment<=0{return None;}
+                        tree.insert(lock_id,increment as u8);
+                        return Some(increment as u8);
+                    },
                     Some(v)=>{
                         match is_pos_or_zero{
                             true=>{
                                 *v+=increment as u8;
                             },
                             false=>{
-                                *v-=increment as u8;
+                                *v-=(-increment) as u8;
                             }
                         }
                         return Some(*v);

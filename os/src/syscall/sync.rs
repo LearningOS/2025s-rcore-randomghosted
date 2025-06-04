@@ -70,26 +70,29 @@ pub fn sys_mutex_lock(mutex_id: usize) -> isize {
             .unwrap()
             .tid
     );
-    let process = current_process();
-    let mut process_inner = process.inner_exclusive_access();
-    let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
-    
     let tid=current_task().unwrap().gettid();
     if tid.is_none(){return -1;}
     let tid=tid.unwrap();
+    
+    let process = current_process();
+    let mut process_inner = process.inner_exclusive_access();
+    let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
+   
+    let enable_detect_deadlock=process_inner.enable_detect_deadlock;
+    process_inner.need_matrix_for_mutex.change_from_btreemap(tid,mutex_id,1);
+    
+    drop(process_inner);
     let detect_result=
-        match process_inner.enable_detect_deadlock{
+        match enable_detect_deadlock{
             true=>process.detect_deadlock(tid,Some(mutex_id),None),
             false=>false
     };
-    process_inner.need_matrix_for_mutex.change_from_btreemap(tid,mutex_id,1);
-    drop(process_inner);
+    drop(process);
+    
     if detect_result {
         return -0xdead;
     }
-
-    drop(process);
-    
+ 
     mutex.lock();
     let process=current_process();
     let mut process_inner=process.inner_exclusive_access();
@@ -162,6 +165,7 @@ pub fn sys_semaphore_create(res_count: usize) -> isize {
 }
 /// semaphore up syscall
 pub fn sys_semaphore_up(sem_id: usize) -> isize {
+println!("sem up begin !!!!!!!!!!!!!!");
     trace!(
         "kernel:pid[{}] tid[{}] sys_semaphore_up",
         current_task().unwrap().process.upgrade().unwrap().getpid(),
@@ -206,16 +210,17 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
     let tid=current_task().unwrap().gettid();
     if tid.is_none(){return -1;}
     let tid=tid.unwrap();
-
-    let detect_result= match process_inner.enable_detect_deadlock{
+    
+    let enable_detect_deadlock=process_inner.enable_detect_deadlock;
+    process_inner.need_matrix_for_semaphore.change_from_btreemap(tid,sem_id,1);
+  
+    drop(process_inner);
+    let detect_result= match enable_detect_deadlock{
         true=>process.detect_deadlock(tid,None,Some(sem_id)),
         false=>false
     };
-    process_inner.need_matrix_for_semaphore.change_from_btreemap(tid,sem_id,1);
+    println!("detect result is: {}, target lock id is {}",detect_result, sem_id);
     if detect_result{return -0xdead;}
-
-    drop(process_inner);
-    drop(process);
 
     sem.down();
     let process=current_process();
@@ -302,7 +307,7 @@ pub fn sys_condvar_wait(condvar_id: usize, mutex_id: usize) -> isize {
 ///
 /// YOUR JOB: Implement deadlock detection, but might not all in this syscall
 pub fn sys_enable_deadlock_detect(_enabled: usize) -> isize {
-    if _enabled!=0 || _enabled!=1{
+    if _enabled!=0 && _enabled!=1{
         return -1;
     }
 
