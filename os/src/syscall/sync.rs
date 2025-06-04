@@ -165,7 +165,6 @@ pub fn sys_semaphore_create(res_count: usize) -> isize {
 }
 /// semaphore up syscall
 pub fn sys_semaphore_up(sem_id: usize) -> isize {
-println!("sem up begin !!!!!!!!!!!!!!");
     trace!(
         "kernel:pid[{}] tid[{}] sys_semaphore_up",
         current_task().unwrap().process.upgrade().unwrap().getpid(),
@@ -219,7 +218,6 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
         true=>process.detect_deadlock(tid,None,Some(sem_id)),
         false=>false
     };
-    println!("detect result is: {}, target lock id is {}",detect_result, sem_id);
     if detect_result{return -0xdead;}
 
     sem.down();

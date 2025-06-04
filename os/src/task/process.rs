@@ -430,20 +430,17 @@ impl ProcessControlBlock {
                 } as usize;
             }
 
-            println!("target_thread: {}", target_thread);
             need_matrix.remove(&target_thread);
             alloc_matrix.remove(&target_thread);
         }
 
         // at the end, compare the need vec of the request one and the available
-        println!("task_id: {}",task_id);
         match need_matrix.get(&task_id){
             None=>{ return false;},
             Some(btree)=>{
                 for i in 0..lock_count{
                     match btree.get(&i){
                         Some(val)=>{
-                            println!("at {}, {} > {} ?",i, *val, available[i]);
                             if usize::from(*val)>available[i]{
                                 return true;
                             }

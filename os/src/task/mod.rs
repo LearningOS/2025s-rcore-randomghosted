@@ -62,7 +62,6 @@ pub fn suspend_current_and_run_next() {
 /// Make current task blocked and switch to the next task.
 pub fn block_current_and_run_next() { 
     let task = take_current_task().unwrap();
- println!("block!!!!!!!!!!!!!!!!!!!!!!!!!!!!! at {}", task.gettid().unwrap());
     let mut task_inner = task.inner_exclusive_access();
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
     task_inner.task_status = TaskStatus::Blocked;
